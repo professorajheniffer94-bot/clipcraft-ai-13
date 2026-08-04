@@ -46,7 +46,9 @@ function ProjectsPage() {
   const create = useMutation({
     mutationFn: async () => {
       const parsed = projectSchema.parse({ name, description: description || undefined });
-      return projectsApi.create(parsed);
+      return projectsApi.create(
+        parsed.description ? { name: parsed.name, description: parsed.description } : { name: parsed.name },
+      );
     },
     onSuccess: () => {
       toast.success("Project created");
