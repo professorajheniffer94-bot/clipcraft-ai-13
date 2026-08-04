@@ -19,7 +19,7 @@ export const Route = createFileRoute("/")({
       { property: "og:title", content: "ClipMind AI — Turn long videos into viral shorts" },
       {
         property: "og:description",
-        content: "AI video repurposing: transcription, viral-moment detection, vertical clips, animated subtitles.",
+        content: "ClipMind AI transcribes your long-form video, finds the moments most likely to go viral, reframes them vertically and ships animated subtitles for TikTok, Reels and Shorts.",
       },
     ],
   }),

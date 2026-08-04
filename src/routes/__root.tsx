@@ -78,14 +78,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
+      { title: "ClipMind AI — Turn long videos into viral shorts" },
+      { name: "description", content: "ClipMind AI transcribes your long-form video, finds the moments most likely to go viral, reframes them vertically and ships animated subtitles for TikTok, Reels and Shorts." },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { property: "og:title", content: "ClipMind AI — Turn long videos into viral shorts" },
+      { property: "og:description", content: "ClipMind AI transcribes your long-form video, finds the moments most likely to go viral, reframes them vertically and ships animated subtitles for TikTok, Reels and Shorts." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "ClipMind AI — Turn long videos into viral shorts" },
+      { name: "twitter:description", content: "ClipMind AI transcribes your long-form video, finds the moments most likely to go viral, reframes them vertically and ships animated subtitles for TikTok, Reels and Shorts." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/0dbf25d1-5841-4691-bd12-13ec4bfd2578/id-preview-ee6890d0--9582b62c-883b-4c92-8457-a8c344e67bea.lovable.app-1785803470615.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/0dbf25d1-5841-4691-bd12-13ec4bfd2578/id-preview-ee6890d0--9582b62c-883b-4c92-8457-a8c344e67bea.lovable.app-1785803470615.png" },
     ],
     links: [
       {
