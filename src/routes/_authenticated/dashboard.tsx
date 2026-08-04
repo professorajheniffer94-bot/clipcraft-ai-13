@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 
 import { PageHeader } from "@/components/layout/AppShell";
+import { ImportVideoDialog } from "@/components/video/ImportVideoDialog";
 import { clipsApi, jobsApi, profilesApi, videosApi } from "@/api/queries";
 import { formatBytes, formatDuration, relativeTime } from "@/utils/format";
 import { JOB_LABELS } from "@/constants/app";
@@ -40,6 +41,7 @@ function DashboardPage() {
       <PageHeader
         title="Dashboard"
         description="Everything moving through the pipeline right now."
+        action={<ImportVideoDialog />}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
