@@ -10,6 +10,9 @@ export const PIPELINE_STAGES = [
   "video_render",
 ] as const;
 
+/** A job stuck in `running` longer than this is considered stalled and retryable. */
+export const STALLED_JOB_MS = 10 * 60 * 1000;
+
 export function providerStatus(): ProviderDescriptor[] {
   return describeAllProviders();
 }

@@ -105,3 +105,66 @@ export const registerUploadedVideo = createServerFn({ method: "POST" })
 
     return { video, ready: isPipelineReady() };
   });
+
+const retrySchema = z.object({
+  videoId: z.string().uuid(),
+  jobId: z.string().uuid().nullable().optional(),
+});
+
+/**
+ * Re-queues failed, cancelled or stalled jobs for a video so the pipeline
+ * never stays stuck. Passing a jobId retries only that stage.
+ */
+export const retryVideoPipeline = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => retrySchema.parse(data))
+  .handler(async ({ data, context }) => {
+    const { STALLED_JOB_MS } = await import("./pipeline.server");
+    const { supabase, userId } = context;
+
+    const { data: jobs, error: readError } = await supabase
+      .from("processing_jobs")
+      .select("id, status, started_at, attempts")
+      .eq("video_id", data.videoId)
+      .eq("user_id", userId);
+    if (readError) throw new Error(readError.message);
+
+    const stalledBefore = Date.now() - STALLED_JOB_MS;
+    const retryable = (jobs ?? []).filter((job) => {
+      if (data.jobId && job.id !== data.jobId) return false;
+      if (job.status === "failed" || job.status === "cancelled") return true;
+      if (job.status === "running") {
+        const started = job.started_at ? new Date(job.started_at).getTime() : 0;
+        return started < stalledBefore;
+      }
+      return false;
+    });
+
+    if (retryable.length === 0) {
+      return { retried: 0, message: "No stuck stages to retry." };
+    }
+
+    const { error: updateError } = await supabase
+      .from("processing_jobs")
+      .update({
+        status: "queued",
+        error: null,
+        progress: 0,
+        started_at: null,
+        finished_at: null,
+      })
+      .in(
+        "id",
+        retryable.map((job) => job.id),
+      );
+    if (updateError) throw new Error(updateError.message);
+
+    const { error: videoError } = await supabase
+      .from("videos")
+      .update({ status: "pending" })
+      .eq("id", data.videoId)
+      .eq("user_id", userId);
+    if (videoError) throw new Error(videoError.message);
+
+    return { retried: retryable.length, message: `${retryable.length} stage(s) re-queued.` };
+  });

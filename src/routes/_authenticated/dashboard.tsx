@@ -3,9 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 
 import { PageHeader } from "@/components/layout/AppShell";
 import { ImportVideoDialog } from "@/components/video/ImportVideoDialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { clipsApi, jobsApi, profilesApi, videosApi } from "@/api/queries";
 import { formatBytes, formatDuration, relativeTime } from "@/utils/format";
 import { JOB_LABELS } from "@/constants/app";
+import { isTransientError } from "@/lib/retry";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({
@@ -21,10 +23,16 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 });
 
 function DashboardPage() {
-  const profile = useQuery({ queryKey: ["profile"], queryFn: profilesApi.me });
-  const videos = useQuery({ queryKey: ["videos"], queryFn: videosApi.list });
-  const clips = useQuery({ queryKey: ["clips", "recent"], queryFn: () => clipsApi.listRecent(6) });
-  const jobs = useQuery({ queryKey: ["jobs", "active"], queryFn: jobsApi.listActive });
+  const retry = (count: number, error: Error) => count < 3 && isTransientError(error);
+  const profile = useQuery({ queryKey: ["profile"], queryFn: profilesApi.me, retry });
+  const videos = useQuery({ queryKey: ["videos"], queryFn: videosApi.list, retry });
+  const clips = useQuery({ queryKey: ["clips", "recent"], queryFn: () => clipsApi.listRecent(6), retry });
+  const jobs = useQuery({
+    queryKey: ["jobs", "active"],
+    queryFn: jobsApi.listActive,
+    refetchInterval: 10000,
+    retry,
+  });
 
   const stats = [
     { label: "Credits left", value: profile.data?.credits_remaining ?? 0 },
@@ -56,7 +64,17 @@ function DashboardPage() {
       <section className="mt-8 grid gap-4 lg:grid-cols-2">
         <div className="surface-panel p-5">
           <h2 className="font-display text-base font-semibold">Processing queue</h2>
-          {jobs.data && jobs.data.length > 0 ? (
+          {jobs.isPending ? (
+            <div className="mt-4 space-y-3">
+              {[0, 1, 2].map((row) => (
+                <Skeleton key={row} className="h-16 w-full rounded-xl" />
+              ))}
+            </div>
+          ) : jobs.error ? (
+            <p className="mt-3 text-sm text-destructive">
+              Couldn't load the queue: {(jobs.error as Error).message}
+            </p>
+          ) : jobs.data && jobs.data.length > 0 ? (
             <ul className="mt-4 space-y-3">
               {jobs.data.map((job) => (
                 <li key={job.id} className="rounded-xl border border-border bg-surface-2 p-3">
@@ -77,7 +95,17 @@ function DashboardPage() {
 
         <div className="surface-panel p-5">
           <h2 className="font-display text-base font-semibold">Recent videos</h2>
-          {videos.data && videos.data.length > 0 ? (
+          {videos.isPending ? (
+            <div className="mt-4 space-y-3">
+              {[0, 1, 2].map((row) => (
+                <Skeleton key={row} className="h-5 w-full" />
+              ))}
+            </div>
+          ) : videos.error ? (
+            <p className="mt-3 text-sm text-destructive">
+              Couldn't load your videos: {(videos.error as Error).message}
+            </p>
+          ) : videos.data && videos.data.length > 0 ? (
             <ul className="mt-4 space-y-3">
               {videos.data.slice(0, 6).map((video) => (
                 <li key={video.id} className="flex items-center justify-between gap-3 text-sm">
