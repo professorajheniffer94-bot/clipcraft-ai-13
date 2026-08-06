@@ -32,6 +32,7 @@ import { importUrlSchema } from "@/utils/validation";
 import { withRetry } from "@/lib/retry";
 
 const NO_PROJECT = "none";
+const PLATFORMS = ["YouTube", "TikTok", "Instagram", "Drive"];
 
 export function ImportVideoDialog({ projectId }: { projectId?: string }) {
   const [open, setOpen] = useState(false);
@@ -40,6 +41,7 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
   const [duration, setDuration] = useState("0");
   const [project, setProject] = useState(projectId ?? NO_PROJECT);
   const [status, setStatus] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const queryClient = useQueryClient();
 
   const importUrl = useServerFn(importVideoFromUrl);
@@ -213,11 +215,32 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
               <Label htmlFor="import-url">Video URL</Label>
               <Input
                 id="import-url"
-                placeholder="https://www.youtube.com/watch?v=..."
+                placeholder="Paste a YouTube, TikTok, Instagram or Drive link…"
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
               />
             </div>
+            <div className="flex flex-wrap gap-2">
+              {PLATFORMS.map((platform) => (
+                <span
+                  key={platform}
+                  className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground"
+                >
+                  {platform}
+                </span>
+              ))}
+            </div>
+            {url.trim().length > 0 ? (
+              <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
+                <span className="grid h-10 w-16 place-items-center rounded bg-primary/15 text-primary">
+                  <Link2 className="size-4" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm">Video detected</p>
+                  <p className="truncate text-xs text-muted-foreground">{url}</p>
+                </div>
+              </div>
+            ) : null}
             <Button
               className="w-full"
               disabled={busy || url.trim().length === 0}
@@ -225,15 +248,43 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
             >
               {urlMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Queue import"}
             </Button>
+            <p className="text-center text-xs text-muted-foreground">
+              Videos up to 2h — the pipeline downloads and processes automatically.
+            </p>
           </TabsContent>
 
           <TabsContent value="upload" className="space-y-3 pt-4">
+            <label
+              htmlFor="import-file"
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragging(false);
+                const dropped = event.dataTransfer.files?.[0];
+                if (dropped) setFile(dropped);
+              }}
+              className={`flex cursor-pointer flex-col items-center gap-1 rounded-xl border-2 border-dashed p-8 text-center transition ${
+                dragging ? "border-primary bg-primary/5" : "border-border"
+              }`}
+            >
+              <Upload className="size-5 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">
+                {file ? file.name : "Drag a video here, or click to choose a file"}
+              </span>
+            </label>
             <div className="space-y-2">
-              <Label htmlFor="import-file">Video file</Label>
+              <Label htmlFor="import-file" className="sr-only">
+                Video file
+              </Label>
               <Input
                 id="import-file"
                 type="file"
                 accept="video/*"
+                className="sr-only"
                 onChange={(event) => setFile(event.target.files?.[0] ?? null)}
               />
             </div>
