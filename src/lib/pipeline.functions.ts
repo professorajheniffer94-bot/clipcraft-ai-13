@@ -131,8 +131,10 @@ export const retryVideoPipeline = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => retrySchema.parse(data))
   .handler(async ({ data, context }) => {
-    const { STALLED_JOB_MS } = await import("./pipeline.server");
+    const { STALLED_JOB_MS, pipelineBlockedReason } = await import("./pipeline.server");
     const { supabase, userId } = context;
+    const blocked = pipelineBlockedReason();
+    if (blocked) return { retried: 0, message: blocked };
 
     const { data: jobs, error: readError } = await supabase
       .from("processing_jobs")
