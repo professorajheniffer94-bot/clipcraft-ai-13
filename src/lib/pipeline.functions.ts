@@ -25,8 +25,11 @@ export const importVideoFromUrl = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => importSchema.parse(data))
   .handler(async ({ data, context }) => {
-    const { PIPELINE_STAGES, isPipelineReady } = await import("./pipeline.server");
+    const { PIPELINE_STAGES, isPipelineReady, pipelineBlockedReason } = await import(
+      "./pipeline.server"
+    );
     const { supabase, userId } = context;
+    const blocked = pipelineBlockedReason();
 
     const { data: video, error } = await supabase
       .from("videos")
@@ -35,7 +38,8 @@ export const importVideoFromUrl = createServerFn({ method: "POST" })
         project_id: data.projectId ?? null,
         source: "url",
         source_url: data.url,
-        status: "pending",
+        status: blocked ? "failed" : "pending",
+        error: blocked,
         title: new URL(data.url).hostname.replace(/^www\./, "") + " import",
         metadata: { target_duration: data.targetDuration },
       })
@@ -47,7 +51,9 @@ export const importVideoFromUrl = createServerFn({ method: "POST" })
       user_id: userId,
       video_id: video.id,
       type: stage,
-      status: "queued" as const,
+      status: blocked ? ("failed" as const) : ("queued" as const),
+      error: blocked,
+      finished_at: blocked ? new Date().toISOString() : null,
       payload: { target_duration: data.targetDuration },
     }));
     const { error: jobError } = await supabase.from("processing_jobs").insert(jobs);
@@ -69,8 +75,11 @@ export const registerUploadedVideo = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => registerUploadSchema.parse(data))
   .handler(async ({ data, context }) => {
-    const { PIPELINE_STAGES, isPipelineReady } = await import("./pipeline.server");
+    const { PIPELINE_STAGES, isPipelineReady, pipelineBlockedReason } = await import(
+      "./pipeline.server"
+    );
     const { supabase, userId } = context;
+    const blocked = pipelineBlockedReason();
 
     if (!data.storagePath.startsWith(`${userId}/`)) {
       throw new Error("Storage path must live in your own folder");
@@ -84,7 +93,8 @@ export const registerUploadedVideo = createServerFn({ method: "POST" })
         source: "upload",
         storage_path: data.storagePath,
         size_bytes: data.sizeBytes,
-        status: "pending",
+        status: blocked ? "failed" : "pending",
+        error: blocked,
         title: data.title,
         metadata: { target_duration: data.targetDuration },
       })
@@ -97,7 +107,9 @@ export const registerUploadedVideo = createServerFn({ method: "POST" })
         user_id: userId,
         video_id: video.id,
         type: stage,
-        status: "queued" as const,
+        status: blocked ? ("failed" as const) : ("queued" as const),
+        error: blocked,
+        finished_at: blocked ? new Date().toISOString() : null,
         payload: { target_duration: data.targetDuration },
       })),
     );
@@ -119,8 +131,10 @@ export const retryVideoPipeline = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => retrySchema.parse(data))
   .handler(async ({ data, context }) => {
-    const { STALLED_JOB_MS } = await import("./pipeline.server");
+    const { STALLED_JOB_MS, pipelineBlockedReason } = await import("./pipeline.server");
     const { supabase, userId } = context;
+    const blocked = pipelineBlockedReason();
+    if (blocked) return { retried: 0, message: blocked };
 
     const { data: jobs, error: readError } = await supabase
       .from("processing_jobs")
