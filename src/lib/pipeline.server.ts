@@ -24,6 +24,22 @@ export function isPipelineReady(): boolean {
   );
 }
 
+/**
+ * Human-readable reason the pipeline cannot run, or null when it can.
+ * Used to fail jobs immediately instead of leaving them queued forever.
+ */
+export function pipelineBlockedReason(): string | null {
+  const providers = describeAllProviders();
+  const missing = ["transcription", "analysis", "render"]
+    .map((capability) => providers.find((p) => p.capability === capability))
+    .filter((p): p is NonNullable<typeof p> => Boolean(p) && !p!.configured);
+  if (missing.length === 0) return null;
+  const detail = missing
+    .map((p) => `${p.capability} (${p.requiredEnv.join(", ") || "no provider selected"})`)
+    .join("; ")
+  return `Pipeline not configured — missing credentials for ${detail}. Add the keys, then retry this video.`;
+}
+
 /** Maps an AI moment onto the clips table insert shape. */
 export function momentToClipInsert(moment: AnalyzedMoment, videoId: string, userId: string) {
   return {
