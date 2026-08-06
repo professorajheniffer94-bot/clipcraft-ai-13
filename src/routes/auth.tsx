@@ -13,7 +13,7 @@ import { signInSchema, signUpSchema, forgotPasswordSchema } from "@/utils/valida
 import { APP_NAME } from "@/constants/app";
 
 export const Route = createFileRoute("/auth")({
-  validateSearch: (search: Record<string, unknown>) => ({
+  validateSearch: (search: Record<string, unknown>): { redirect?: string | undefined } => ({
     redirect: typeof search['redirect'] === "string" ? (search['redirect'] as string) : undefined,
   }),
   head: () => ({
