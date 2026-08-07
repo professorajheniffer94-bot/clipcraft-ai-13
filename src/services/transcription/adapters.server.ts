@@ -97,34 +97,6 @@ const groq: TranscriptionProvider = {
   },
 };
 
-const whisperUnused: TranscriptionProvider = {
-  id: "whisper",
-  async transcribe({ audioUrl, language }: TranscriptionRequest) {
-    const audio = await fetch(audioUrl);
-    if (!audio.ok) throw new Error(`Unable to read audio [${audio.status}]`);
-    const form = new FormData();
-    form.append("file", await audio.blob(), "audio.mp3");
-    form.append("model", process.env["WHISPER_MODEL"] ?? "whisper-1");
-    form.append("response_format", "verbose_json");
-    form.append("timestamp_granularities[]", "word");
-    if (language) form.append("language", language);
-
-    const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${requireEnv("OPENAI_API_KEY")}` },
-      body: form,
-    });
-    const data = await readJson(response, "whisper");
-    return {
-      ...emptyResult("whisper"),
-      language: data.language ?? language ?? null,
-      text: data.text ?? "",
-      words: (data.words ?? []).map((w: any) => ({ text: w.word, start: w.start, end: w.end })),
-      segments: (data.segments ?? []).map((s: any) => ({ start: s.start, end: s.end, text: s.text })),
-    };
-  },
-};
-
 const deepgram: TranscriptionProvider = {
   id: "deepgram",
   async transcribe({ audioUrl, language, diarize = true }: TranscriptionRequest) {
@@ -248,7 +220,6 @@ const REGISTRY: Record<string, TranscriptionProvider> = {
   custom,
 };
 
-void whisperUnused;
 
 export function createTranscriptionProvider(id: string): TranscriptionProvider {
   const provider = REGISTRY[id];
