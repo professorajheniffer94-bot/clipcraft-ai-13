@@ -182,3 +182,17 @@ export const retryVideoPipeline = createServerFn({ method: "POST" })
 
     return { retried: retryable.length, message: `${retryable.length} stage(s) re-queued.` };
   });
+
+const runSchema = z.object({ videoId: z.string().uuid() });
+
+/**
+ * Executes the queued stages for a video (transcription -> AI analysis ->
+ * clips). Called by the UI right after import and by the "retry" action.
+ */
+export const processVideo = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => runSchema.parse(data))
+  .handler(async ({ data, context }) => {
+    const { runVideoPipeline } = await import("./pipeline-worker.server");
+    return runVideoPipeline(context.supabase, context.userId, data.videoId);
+  });
