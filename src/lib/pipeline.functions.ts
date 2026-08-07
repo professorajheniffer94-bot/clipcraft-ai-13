@@ -283,10 +283,6 @@ export const importYouTubeVideo = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(error.message);
 
-    if (consentRow?.id) {
-      await supabase.from("video_consents").update({ video_id: video.id }).eq("id", consentRow.id);
-    }
-
     const { error: jobError } = await supabase.from("processing_jobs").insert(
       PIPELINE_STAGES.filter((stage) => stage !== "download").map((stage) => ({
         user_id: userId,
