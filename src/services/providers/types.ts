@@ -14,6 +14,8 @@ export interface ProviderDescriptor {
   selectorEnv: string;
   /** Env vars the adapter needs to actually run. */
   requiredEnv: string[];
+  /** True when the provider runs in the browser (no server credentials). */
+  clientSide?: boolean;
   configured: boolean;
 }
 
