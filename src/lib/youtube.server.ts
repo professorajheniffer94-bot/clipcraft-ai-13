@@ -24,8 +24,6 @@ export interface ResolvedMedia {
 }
 
 export { youtubeVideoId } from "./youtube-url";
-import { youtubeVideoId as _unused } from "./youtube-url";
-void _unused;
 
 /** Confirms the video exists and is publicly reachable (free, no API key). */
 export async function fetchYoutubeMeta(videoId: string): Promise<YoutubeMeta> {
