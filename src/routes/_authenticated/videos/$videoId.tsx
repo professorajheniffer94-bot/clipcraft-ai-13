@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { AlertCircle, ArrowLeft, Loader2, RefreshCw } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { AlertCircle, ArrowLeft, Loader2, Play, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/layout/AppShell";
@@ -10,10 +11,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { clipsApi, jobsApi, videosApi } from "@/api/queries";
+import { clipsApi, jobsApi, transcriptionsApi, videosApi } from "@/api/queries";
+import { ClipRenderButton } from "@/components/video/ClipRenderButton";
 import { JOB_LABELS } from "@/constants/app";
 import { formatDuration, relativeTime } from "@/utils/format";
-import { retryVideoPipeline } from "@/lib/pipeline.functions";
+import { processVideo, retryVideoPipeline } from "@/lib/pipeline.functions";
+import type { TranscriptWord } from "@/services/providers/types";
 import { isTransientError } from "@/lib/retry";
 
 export const Route = createFileRoute("/_authenticated/videos/$videoId")({
@@ -54,6 +57,37 @@ function VideoDetailPage() {
     retry: retryQuery,
   });
 
+  const transcription = useQuery({
+    queryKey: ["transcription", videoId],
+    queryFn: () => transcriptionsApi.byVideo(videoId),
+    retry: retryQuery,
+  });
+
+  const runProcess = useServerFn(processVideo);
+  const processMutation = useMutation({
+    mutationFn: () => runProcess({ data: { videoId } }),
+    onSuccess: (result) => {
+      if (result.ok) toast.success(result.message ?? "Pipeline finished");
+      else toast.error(result.message ?? "Pipeline failed");
+      void queryClient.invalidateQueries({ queryKey: ["jobs", videoId] });
+      void queryClient.invalidateQueries({ queryKey: ["video", videoId] });
+      void queryClient.invalidateQueries({ queryKey: ["clips", videoId] });
+      void queryClient.invalidateQueries({ queryKey: ["transcription", videoId] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  // Kick the pipeline off automatically the first time we see queued work.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoStarted.current || processMutation.isPending) return;
+    const status = video.data?.status;
+    const hasQueued = (jobs.data ?? []).some((job) => job.status === "queued");
+    if (!hasQueued || (status !== "pending" && status !== "processing")) return;
+    autoStarted.current = true;
+    processMutation.mutate();
+  }, [video.data?.status, jobs.data, processMutation]);
+
   const runRetry = useServerFn(retryVideoPipeline);
   const retryMutation = useMutation({
     mutationFn: (jobId?: string) => runRetry({ data: { videoId, jobId: jobId ?? null } }),
@@ -68,6 +102,7 @@ function VideoDetailPage() {
 
   const jobList = jobs.data ?? [];
   const stuck = jobList.filter((job) => job.status === "failed" || job.status === "cancelled");
+  const words = ((transcription.data?.words ?? []) as unknown as TranscriptWord[]) ?? [];
   const loadError = (video.error ?? jobs.error ?? clips.error) as Error | null;
 
   return (
@@ -108,9 +143,24 @@ function VideoDetailPage() {
         }
         action={
           video.data ? (
-            <Badge variant="secondary" className="capitalize">
-              {video.data.status}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="capitalize">
+                {video.data.status}
+              </Badge>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={processMutation.isPending}
+                onClick={() => processMutation.mutate()}
+              >
+                {processMutation.isPending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Play className="size-4" />
+                )}
+                {processMutation.isPending ? "Processing…" : "Process now"}
+              </Button>
+            </div>
           ) : null
         }
       />
@@ -164,6 +214,9 @@ function VideoDetailPage() {
                     {formatDuration(clip.start_seconds)} → {formatDuration(clip.end_seconds)} ·{" "}
                     {clip.category ?? "moment"}
                   </p>
+                  {video.data ? (
+                    <ClipRenderButton clip={clip} video={video.data} words={words} />
+                  ) : null}
                 </li>
               ))}
             </ul>
