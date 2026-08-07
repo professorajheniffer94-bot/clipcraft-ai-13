@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { Database } from "@/integrations/supabase/types";
+import type { Database, Json } from "@/integrations/supabase/types";
 import { getAnalysisProvider, getTranscriptionProvider } from "@/services/providers/registry.server";
 import type { AnalyzedMoment } from "@/services/providers/types";
 
@@ -106,7 +106,7 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
       const provider = getTranscriptionProvider();
       const result = await provider.transcribe({
         audioUrl: mediaUrl,
-        language: video.language ?? undefined,
+        ...(video.language ? { language: video.language } : {}),
       });
       transcriptText = result.text;
       language = result.language;
@@ -116,9 +116,9 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
         provider: result.provider,
         language: result.language,
         text: result.text,
-        segments: result.segments as unknown as Database["public"]["Tables"]["transcriptions"]["Insert"]["segments"],
-        words: result.words as unknown as Database["public"]["Tables"]["transcriptions"]["Insert"]["words"],
-        speakers: result.speakers,
+        segments: result.segments as unknown as Json,
+        words: result.words as unknown as Json,
+        speakers: result.speakers as unknown as Json,
         confidence: result.confidence,
       });
       if (error) throw new Error(error.message);
@@ -155,7 +155,7 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
         status: "succeeded",
         progress: 100,
         provider: provider.id,
-        result: { moments: moments as unknown as Record<string, unknown>[] },
+        result: { moments } as unknown as Json,
         finished_at: new Date().toISOString(),
       });
     }
@@ -171,7 +171,7 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
       });
       const { error } = await supabase
         .from("clips")
-        .insert(moments.map((moment) => momentToClipInsert(moment, videoId, userId)));
+        .insert(moments.map((moment) => momentToClipInsert(moment, videoId, userId)) as never);
       if (error) throw new Error(error.message);
       await setJob(supabase, clipJob.id, {
         status: "succeeded",
@@ -201,7 +201,7 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
       video_id: videoId,
       event_type: "pipeline_completed",
       credits_used: Math.max(1, moments.length),
-      metadata: { clips: moments.length },
+      metadata: { clips: moments.length } as unknown as Json,
     });
 
     return { ok: true, clips: moments.length, message: `${moments.length} clip(s) ready` };
