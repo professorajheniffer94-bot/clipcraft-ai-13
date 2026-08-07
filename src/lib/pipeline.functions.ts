@@ -196,6 +196,113 @@ export const retryVideoPipeline = createServerFn({ method: "POST" })
 
 const runSchema = z.object({ videoId: z.string().uuid() });
 
+const youtubeSchema = z.object({
+  url: z.string().trim().url().max(2048),
+  projectId: z.string().uuid().nullable().optional(),
+  targetDuration: z.number().min(0).max(180).default(0),
+  consent: z.literal(true),
+  consentText: z.string().trim().min(20).max(2000),
+  userAgent: z.string().trim().max(500).optional(),
+  audioOnly: z.boolean().default(false),
+});
+
+/**
+ * Imports a YouTube link: records the copyright consent, downloads the media
+ * through the configured download service, stores it in the same bucket used
+ * by uploads and queues the regular pipeline stages.
+ */
+export const importYouTubeVideo = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => youtubeSchema.parse(data))
+  .handler(async ({ data, context }) => {
+    const { PIPELINE_STAGES, isPipelineReady, pipelineBlockedReason } = await import(
+      "./pipeline.server"
+    );
+    const {
+      youtubeVideoId,
+      fetchYoutubeMeta,
+      resolveYoutubeMedia,
+      downloadResolvedMedia,
+      youtubeImportBlockedReason,
+    } = await import("./youtube.server");
+    const { MAX_LINK_IMPORT_BYTES, STORAGE_BUCKET } = await import("@/constants/app");
+    const { supabase, userId } = context;
+
+    const videoId = youtubeVideoId(data.url);
+    if (!videoId) throw new Error("That is not a valid YouTube video link.");
+
+    // Consent is stored before anything else, so the history exists even if the download fails.
+    const { data: consentRow } = await supabase
+      .from("video_consents")
+      .insert({
+        user_id: userId,
+        source_url: data.url,
+        consent_text: data.consentText,
+        user_agent: data.userAgent ?? null,
+      })
+      .select("id")
+      .single();
+
+    const configIssue = youtubeImportBlockedReason();
+    if (configIssue) throw new Error(configIssue);
+
+    const meta = await fetchYoutubeMeta(videoId);
+    const media = await resolveYoutubeMedia(videoId, data.audioOnly ? "audio" : "video");
+    const file = await downloadResolvedMedia(media, MAX_LINK_IMPORT_BYTES);
+
+    const extension = media.kind === "audio" ? "mp3" : "mp4";
+    const storagePath = `${userId}/youtube/${Date.now()}-${videoId}.${extension}`;
+    const { error: uploadError } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(storagePath, file.bytes, { contentType: file.contentType, upsert: true });
+    if (uploadError) throw new Error(uploadError.message);
+
+    const blocked = pipelineBlockedReason();
+    const { data: video, error } = await supabase
+      .from("videos")
+      .insert({
+        user_id: userId,
+        project_id: data.projectId ?? null,
+        source: "youtube",
+        source_url: data.url,
+        storage_path: storagePath,
+        size_bytes: file.bytes.byteLength,
+        title: meta.title,
+        channel: meta.author,
+        thumbnail_url: meta.thumbnailUrl,
+        status: blocked ? "failed" : "pending",
+        error: blocked,
+        metadata: {
+          target_duration: data.targetDuration,
+          youtube_id: videoId,
+          media_kind: media.kind,
+          consent_id: consentRow?.id ?? null,
+        },
+      })
+      .select("*")
+      .single();
+    if (error) throw new Error(error.message);
+
+    if (consentRow?.id) {
+      await supabase.from("video_consents").update({ video_id: video.id }).eq("id", consentRow.id);
+    }
+
+    const { error: jobError } = await supabase.from("processing_jobs").insert(
+      PIPELINE_STAGES.filter((stage) => stage !== "download").map((stage) => ({
+        user_id: userId,
+        video_id: video.id,
+        type: stage,
+        status: blocked ? ("failed" as const) : ("queued" as const),
+        error: blocked,
+        finished_at: blocked ? new Date().toISOString() : null,
+        payload: { target_duration: data.targetDuration },
+      })),
+    );
+    if (jobError) throw new Error(jobError.message);
+
+    return { video, ready: isPipelineReady() };
+  });
+
 /**
  * Executes the queued stages for a video (transcription -> AI analysis ->
  * clips). Called by the UI right after import and by the "retry" action.
