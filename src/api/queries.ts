@@ -108,6 +108,9 @@ export const brandKitsApi = {
   async list(): Promise<BrandKitRow[]> {
     return unwrap(await supabase.from("brand_kits").select("*").order("created_at"));
   },
+  async list(): Promise<BrandKitRow[]> {
+    return unwrap(await supabase.from("brand_kits").select("*").order("created_at"));
+  },
   async create(input: Omit<Tables["brand_kits"]["Insert"], "user_id">) {
     const { data: auth } = await supabase.auth.getUser();
     if (!auth.user) throw new Error("Not signed in");
