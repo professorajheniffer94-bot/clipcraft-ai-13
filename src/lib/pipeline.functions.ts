@@ -31,6 +31,13 @@ export const importVideoFromUrl = createServerFn({ method: "POST" })
     const { mediaUrlProblem } = await import("./media-url");
     const problem = mediaUrlProblem(data.url);
     if (problem) throw new Error(problem);
+
+    // Probe the URL before queueing anything, so bad links fail fast.
+    const { probeMediaUrl } = await import("./media-probe.server");
+    const { MAX_UPLOAD_BYTES } = await import("@/constants/app");
+    const probe = await probeMediaUrl(data.url, MAX_UPLOAD_BYTES);
+    if (!probe.ok) throw new Error(probe.reason ?? "This link is not a usable media file.");
+
     const { supabase, userId } = context;
     const blocked = pipelineBlockedReason();
 
@@ -43,6 +50,7 @@ export const importVideoFromUrl = createServerFn({ method: "POST" })
         source_url: data.url,
         status: blocked ? "failed" : "pending",
         error: blocked,
+        size_bytes: probe.sizeBytes ?? null,
         title: new URL(data.url).hostname.replace(/^www\./, "") + " import",
         metadata: { target_duration: data.targetDuration },
       })
