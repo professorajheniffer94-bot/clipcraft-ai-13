@@ -1,6 +1,7 @@
 import type { TranscriptionProvider, TranscriptionRequest, TranscriptionResult } from "../providers/types";
 
 export const TRANSCRIPTION_PROVIDERS = {
+  groq: { requiredEnv: ["GROQ_API_KEY"] },
   whisper: { requiredEnv: ["OPENAI_API_KEY"] },
   deepgram: { requiredEnv: ["DEEPGRAM_API_KEY"] },
   assemblyai: { requiredEnv: ["ASSEMBLYAI_API_KEY"] },
@@ -49,6 +50,49 @@ const whisper: TranscriptionProvider = {
       text: data.text ?? "",
       words: (data.words ?? []).map((w: any) => ({ text: w.word, start: w.start, end: w.end })),
       segments: (data.segments ?? []).map((s: any) => ({ start: s.start, end: s.end, text: s.text })),
+    };
+  },
+};
+
+/**
+ * Groq hosts Whisper large v3 with a generous free tier and word timestamps.
+ * Default transcription provider for the pipeline.
+ */
+const groq: TranscriptionProvider = {
+  id: "groq",
+  async transcribe({ audioUrl, language }: TranscriptionRequest) {
+    const media = await fetch(audioUrl);
+    if (!media.ok) throw new Error(`Unable to read media [${media.status}]`);
+    const form = new FormData();
+    form.append("file", await media.blob(), "media.mp4");
+    form.append("model", process.env["GROQ_TRANSCRIPTION_MODEL"] ?? "whisper-large-v3");
+    form.append("response_format", "verbose_json");
+    form.append("timestamp_granularities[]", "word");
+    form.append("timestamp_granularities[]", "segment");
+    if (language) form.append("language", language);
+
+    const data = await readJson(
+      await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${requireEnv("GROQ_API_KEY")}` },
+        body: form,
+      }),
+      "groq",
+    );
+    return {
+      ...emptyResult("groq"),
+      language: data.language ?? language ?? null,
+      text: data.text ?? "",
+      words: (data.words ?? []).map((w: any) => ({
+        text: w.word ?? w.text,
+        start: w.start,
+        end: w.end,
+      })),
+      segments: (data.segments ?? []).map((s: any) => ({
+        start: s.start,
+        end: s.end,
+        text: s.text,
+      })),
     };
   },
 };
@@ -168,7 +212,14 @@ const custom: TranscriptionProvider = {
   },
 };
 
-const REGISTRY: Record<string, TranscriptionProvider> = { whisper, deepgram, assemblyai, custom };
+const REGISTRY: Record<string, TranscriptionProvider> = {
+  groq,
+  whisper,
+  deepgram,
+  assemblyai,
+  custom,
+};
+
 
 export function createTranscriptionProvider(id: string): TranscriptionProvider {
   const provider = REGISTRY[id];

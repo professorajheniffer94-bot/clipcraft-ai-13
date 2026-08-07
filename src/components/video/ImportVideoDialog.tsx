@@ -27,7 +27,8 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { projectsApi } from "@/api/queries";
 import { importVideoFromUrl, registerUploadedVideo } from "@/lib/pipeline.functions";
-import { CLIP_DURATIONS, STORAGE_BUCKET } from "@/constants/app";
+import { CLIP_DURATIONS, MAX_UPLOAD_BYTES, STORAGE_BUCKET } from "@/constants/app";
+import { formatBytes } from "@/utils/format";
 import { importUrlSchema } from "@/utils/validation";
 import { withRetry } from "@/lib/retry";
 
@@ -88,6 +89,11 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
   const uploadMutation = useMutation({
     mutationFn: async () => {
       if (!file) throw new Error("Choose a video file first");
+      if (file.size > MAX_UPLOAD_BYTES) {
+        throw new Error(
+          `This file is ${formatBytes(file.size)}. The free plan accepts videos up to ${formatBytes(MAX_UPLOAD_BYTES)}.`,
+        );
+      }
       const { data: auth } = await supabase.auth.getUser();
       if (!auth.user) throw new Error("Not signed in");
       const safeName = file.name.replace(/[^\w.-]+/g, "-");

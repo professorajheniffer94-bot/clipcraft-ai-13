@@ -1,6 +1,7 @@
 import type { AnalysisProvider, AnalysisRequest, AnalyzedMoment } from "../providers/types";
 
 export const ANALYSIS_PROVIDERS = {
+  lovable: { requiredEnv: ["LOVABLE_API_KEY"] },
   openai: { requiredEnv: ["OPENAI_API_KEY"] },
   anthropic: { requiredEnv: ["ANTHROPIC_API_KEY"] },
   gemini: { requiredEnv: ["GEMINI_API_KEY"] },
@@ -49,6 +50,29 @@ async function expectOk(response: Response, provider: string): Promise<any> {
   if (!response.ok) throw new Error(`${provider} analysis failed [${response.status}]: ${body}`);
   return JSON.parse(body);
 }
+
+/** Default: Lovable AI gateway, no third-party key required. */
+const lovable: AnalysisProvider = {
+  id: "lovable",
+  async analyze(request) {
+    const data = await expectOk(
+      await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "Lovable-API-Key": requireEnv("LOVABLE_API_KEY"),
+        },
+        body: JSON.stringify({
+          model: "openai/gpt-5.6-sol",
+          response_format: { type: "json_object" },
+          messages: [{ role: "user", content: buildPrompt(request) }],
+        }),
+      }),
+      "lovable",
+    );
+    return parseMoments(data.choices?.[0]?.message?.content ?? "");
+  },
+};
 
 const openai: AnalysisProvider = {
   id: "openai",
@@ -135,7 +159,13 @@ const custom: AnalysisProvider = {
   },
 };
 
-const REGISTRY: Record<string, AnalysisProvider> = { openai, anthropic, gemini, custom };
+const REGISTRY: Record<string, AnalysisProvider> = {
+  lovable,
+  openai,
+  anthropic,
+  gemini,
+  custom,
+};
 
 export function createAnalysisProvider(id: string): AnalysisProvider {
   const provider = REGISTRY[id];

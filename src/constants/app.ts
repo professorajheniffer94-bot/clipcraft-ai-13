@@ -93,3 +93,6 @@ export const PLANS: PlanDefinition[] = [
 ];
 
 export const STORAGE_BUCKET = "videos";
+
+/** Free-plan upload ceiling (500MB). */
+export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
