@@ -547,6 +547,47 @@ export type Database = {
           },
         ]
       }
+      video_consents: {
+        Row: {
+          accepted_at: string
+          consent_text: string
+          created_at: string
+          id: string
+          source_url: string
+          user_agent: string | null
+          user_id: string
+          video_id: string | null
+        }
+        Insert: {
+          accepted_at?: string
+          consent_text: string
+          created_at?: string
+          id?: string
+          source_url: string
+          user_agent?: string | null
+          user_id: string
+          video_id?: string | null
+        }
+        Update: {
+          accepted_at?: string
+          consent_text?: string
+          created_at?: string
+          id?: string
+          source_url?: string
+          user_agent?: string | null
+          user_id?: string
+          video_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "video_consents_video_id_fkey"
+            columns: ["video_id"]
+            isOneToOne: false
+            referencedRelation: "videos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       videos: {
         Row: {
           channel: string | null
