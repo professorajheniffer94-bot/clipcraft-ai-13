@@ -108,9 +108,6 @@ export const brandKitsApi = {
   async list(): Promise<BrandKitRow[]> {
     return unwrap(await supabase.from("brand_kits").select("*").order("created_at"));
   },
-  async list(): Promise<BrandKitRow[]> {
-    return unwrap(await supabase.from("brand_kits").select("*").order("created_at"));
-  },
   async create(input: Omit<Tables["brand_kits"]["Insert"], "user_id">) {
     const { data: auth } = await supabase.auth.getUser();
     if (!auth.user) throw new Error("Not signed in");
@@ -135,5 +132,80 @@ export const billingApi = {
     return unwrap(
       await supabase.from("usage").select("*").order("created_at", { ascending: false }).limit(50),
     );
+  },
+};
+export type TranscriptionRow = Tables["transcriptions"]["Row"];
+export type ExportRow = Tables["exports"]["Row"];
+
+export const transcriptionsApi = {
+  async byVideo(videoId: string): Promise<TranscriptionRow | null> {
+    return unwrap(
+      await supabase.from("transcriptions").select("*").eq("video_id", videoId).maybeSingle(),
+    );
+  },
+};
+
+export const mediaApi = {
+  /** Short-lived signed URL for the original video file. */
+  async sourceUrl(video: VideoRow): Promise<string> {
+    if (video.storage_path) {
+      const { data, error } = await supabase.storage
+        .from("videos")
+        .createSignedUrl(video.storage_path, 60 * 60);
+      if (error || !data?.signedUrl) throw new Error(error?.message ?? "Could not sign video URL");
+      return data.signedUrl;
+    }
+    if (video.source_url) return video.source_url;
+    throw new Error("This video has no downloadable source");
+  },
+};
+
+export const exportsApi = {
+  async listByClip(clipId: string): Promise<ExportRow[]> {
+    return unwrap(
+      await supabase
+        .from("exports")
+        .select("*")
+        .eq("clip_id", clipId)
+        .order("created_at", { ascending: false }),
+    );
+  },
+  /** Stores a rendered clip in storage and records the export row. */
+  async saveRendered(input: {
+    clipId: string;
+    blob: Blob;
+    width: number;
+    height: number;
+    fps: number;
+  }): Promise<{ export: ExportRow; url: string }> {
+    const { data: auth } = await supabase.auth.getUser();
+    if (!auth.user) throw new Error("Not signed in");
+    const path = `${auth.user.id}/exports/${input.clipId}-${Date.now()}.mp4`;
+    const { error: uploadError } = await supabase.storage
+      .from("videos")
+      .upload(path, input.blob, { contentType: "video/mp4", upsert: true });
+    if (uploadError) throw new Error(uploadError.message);
+
+    const row = unwrap(
+      await supabase
+        .from("exports")
+        .insert({
+          user_id: auth.user.id,
+          clip_id: input.clipId,
+          format: "mp4",
+          width: input.width,
+          height: input.height,
+          fps: input.fps,
+          quality: "high",
+          file_path: path,
+          size_bytes: input.blob.size,
+          status: "ready",
+        })
+        .select("*")
+        .single(),
+    );
+
+    const { data: signed } = await supabase.storage.from("videos").createSignedUrl(path, 60 * 60);
+    return { export: row, url: signed?.signedUrl ?? "" };
   },
 };
