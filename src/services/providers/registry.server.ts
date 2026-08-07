@@ -19,16 +19,27 @@ interface CapabilitySpec {
   selectorEnv: string;
   fallbackId: string;
   providers: Record<string, { readonly requiredEnv: readonly string[] }>;
+  /** Providers that run in the user's browser need no server credentials. */
+  clientSideIds?: readonly string[];
 }
 
 const SPECS: Record<ProviderCapability, CapabilitySpec> = {
   transcription: {
     selectorEnv: "TRANSCRIPTION_PROVIDER",
-    fallbackId: "whisper",
+    fallbackId: "groq",
     providers: TRANSCRIPTION_PROVIDERS,
   },
-  analysis: { selectorEnv: "AI_ANALYSIS_PROVIDER", fallbackId: "openai", providers: ANALYSIS_PROVIDERS },
-  render: { selectorEnv: "RENDER_PROVIDER", fallbackId: "ffmpeg", providers: RENDER_PROVIDERS },
+  analysis: {
+    selectorEnv: "AI_ANALYSIS_PROVIDER",
+    fallbackId: "lovable",
+    providers: ANALYSIS_PROVIDERS,
+  },
+  render: {
+    selectorEnv: "RENDER_PROVIDER",
+    fallbackId: "browser",
+    providers: { ...RENDER_PROVIDERS, browser: { requiredEnv: [] } },
+    clientSideIds: ["browser"],
+  },
   voice: {
     selectorEnv: "VOICE_PROVIDER",
     fallbackId: "elevenlabs",
@@ -41,12 +52,14 @@ export function describeProvider(capability: ProviderCapability): ProviderDescri
   const id = env(spec.selectorEnv) ?? spec.fallbackId;
   const requiredEnv = [...(spec.providers[id]?.requiredEnv ?? [])];
   const missing = requiredEnv.filter((name) => !env(name));
+  const clientSide = (spec.clientSideIds ?? []).includes(id);
   return {
     capability,
     id,
     selectorEnv: spec.selectorEnv,
     requiredEnv,
-    configured: requiredEnv.length > 0 && missing.length === 0,
+    clientSide,
+    configured: clientSide || (requiredEnv.length > 0 && missing.length === 0),
   };
 }
 
@@ -55,6 +68,7 @@ export function describeAllProviders(): ProviderDescriptor[] {
 }
 
 function assertConfigured(descriptor: ProviderDescriptor) {
+  if (descriptor.clientSide) return;
   const missing = descriptor.requiredEnv.filter((name) => !env(name));
   if (descriptor.requiredEnv.length === 0 || missing.length > 0) {
     throw new ProviderNotConfiguredError(
