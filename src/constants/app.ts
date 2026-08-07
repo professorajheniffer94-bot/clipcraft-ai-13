@@ -96,3 +96,10 @@ export const STORAGE_BUCKET = "videos";
 
 /** Free-plan upload ceiling (500MB). */
 export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+
+/** Link imports are downloaded server-side, so they use a tighter ceiling (300MB). */
+export const MAX_LINK_IMPORT_BYTES = 300 * 1024 * 1024;
+
+/** Copyright declaration the user must accept before importing a YouTube link. */
+export const COPYRIGHT_CONSENT_TEXT =
+  "Declaro que possuo os direitos autorais sobre este vídeo ou tenho autorização do titular dos direitos para utilizá-lo e processá-lo nesta plataforma. Sou o único responsável por qualquer uso indevido de conteúdo de terceiros.";
