@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { AlertCircle, Loader2, Link2, Upload } from "lucide-react";
+import { AlertCircle, Loader2, Link2, Upload, Youtube } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -26,12 +27,23 @@ import {
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { projectsApi } from "@/api/queries";
-import { importVideoFromUrl, registerUploadedVideo } from "@/lib/pipeline.functions";
-import { CLIP_DURATIONS, MAX_UPLOAD_BYTES, STORAGE_BUCKET } from "@/constants/app";
+import {
+  importVideoFromUrl,
+  importYouTubeVideo,
+  registerUploadedVideo,
+} from "@/lib/pipeline.functions";
+import {
+  CLIP_DURATIONS,
+  COPYRIGHT_CONSENT_TEXT,
+  MAX_LINK_IMPORT_BYTES,
+  MAX_UPLOAD_BYTES,
+  STORAGE_BUCKET,
+} from "@/constants/app";
 import { formatBytes } from "@/utils/format";
 import { importUrlSchema } from "@/utils/validation";
 import { withRetry } from "@/lib/retry";
 import { mediaUrlProblem } from "@/lib/media-url";
+import { youtubeVideoId } from "@/lib/youtube-url";
 
 const NO_PROJECT = "none";
 const FORMATS = ["MP4", "MOV", "WEBM", "MP3", "M4A"];
@@ -44,10 +56,13 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
   const [project, setProject] = useState(projectId ?? NO_PROJECT);
   const [status, setStatus] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [consent, setConsent] = useState(false);
   const queryClient = useQueryClient();
 
   const importUrl = useServerFn(importVideoFromUrl);
   const registerUpload = useServerFn(registerUploadedVideo);
+  const importYoutube = useServerFn(importYouTubeVideo);
   const projects = useQuery({ queryKey: ["projects"], queryFn: projectsApi.list });
 
   function done(message: string) {
@@ -56,6 +71,8 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
     setOpen(false);
     setUrl("");
     setFile(null);
+    setYoutubeUrl("");
+    setConsent(false);
     void queryClient.invalidateQueries({ queryKey: ["videos"] });
     void queryClient.invalidateQueries({ queryKey: ["jobs", "active"] });
   }
@@ -132,9 +149,37 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
     },
   });
 
-  const busy = urlMutation.isPending || uploadMutation.isPending;
-  const failure = (urlMutation.error ?? uploadMutation.error) as Error | null;
+  const youtubeMutation = useMutation({
+    mutationFn: async () => {
+      if (!consent) throw new Error("You must accept the copyright declaration first");
+      setStatus("Fetching the video from YouTube…");
+      return withRetry(
+        () =>
+          importYoutube({
+            data: {
+              url: youtubeUrl.trim(),
+              projectId: project === NO_PROJECT ? null : project,
+              targetDuration: Number(duration),
+              consent: true,
+              consentText: COPYRIGHT_CONSENT_TEXT,
+              userAgent: navigator.userAgent.slice(0, 500),
+              audioOnly: false,
+            },
+          }),
+        { onRetry: retryNotice },
+      );
+    },
+    onSuccess: () => done("YouTube video imported and queued"),
+    onError: (error: Error) => {
+      setStatus(null);
+      toast.error(error.message);
+    },
+  });
+
+  const busy = urlMutation.isPending || uploadMutation.isPending || youtubeMutation.isPending;
+  const failure = (urlMutation.error ?? uploadMutation.error ?? youtubeMutation.error) as Error | null;
   const urlProblem = url.trim().length > 0 ? mediaUrlProblem(url.trim()) : null;
+  const youtubeValid = youtubeUrl.trim().length > 0 && Boolean(youtubeVideoId(youtubeUrl.trim()));
 
   return (
     <Dialog
@@ -208,15 +253,65 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
           </div>
         </div>
 
-        <Tabs defaultValue="url" className="mt-2">
+        <Tabs defaultValue="youtube" className="mt-2">
           <TabsList className="w-full">
+            <TabsTrigger value="youtube" className="flex-1 gap-2">
+              <Youtube className="size-4" /> YouTube
+            </TabsTrigger>
             <TabsTrigger value="url" className="flex-1 gap-2">
-              <Link2 className="size-4" /> From link
+              <Link2 className="size-4" /> Direct link
             </TabsTrigger>
             <TabsTrigger value="upload" className="flex-1 gap-2">
               <Upload className="size-4" /> Upload
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="youtube" className="space-y-3 pt-4">
+            <div className="space-y-2">
+              <Label htmlFor="youtube-url">YouTube link</Label>
+              <Input
+                id="youtube-url"
+                placeholder="https://www.youtube.com/watch?v=…"
+                value={youtubeUrl}
+                onChange={(event) => setYoutubeUrl(event.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                We download the video for you (up to {formatBytes(MAX_LINK_IMPORT_BYTES)}) and run the
+                same pipeline as an upload. Private, removed and live videos can't be imported.
+              </p>
+            </div>
+            {youtubeUrl.trim().length > 0 && !youtubeValid ? (
+              <Alert variant="destructive">
+                <AlertCircle className="size-4" />
+                <AlertTitle>Invalid link</AlertTitle>
+                <AlertDescription>
+                  Paste a full YouTube video link (watch, youtu.be, shorts or live).
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-surface p-3">
+              <Checkbox
+                checked={consent}
+                onCheckedChange={(value) => setConsent(value === true)}
+                aria-label="Aceitar declaração de direitos autorais"
+                className="mt-0.5"
+              />
+              <span className="text-xs leading-relaxed text-muted-foreground">
+                {COPYRIGHT_CONSENT_TEXT}
+              </span>
+            </label>
+            <Button
+              className="w-full"
+              disabled={busy || !youtubeValid || !consent}
+              onClick={() => youtubeMutation.mutate()}
+            >
+              {youtubeMutation.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                "Import from YouTube"
+              )}
+            </Button>
+          </TabsContent>
 
           <TabsContent value="url" className="space-y-3 pt-4">
             <div className="space-y-2">
