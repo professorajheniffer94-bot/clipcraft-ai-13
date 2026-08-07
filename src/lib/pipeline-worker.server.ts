@@ -207,8 +207,13 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
     return { ok: true, clips: moments.length, message: `${moments.length} clip(s) ready` };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Pipeline failed";
-    const running = jobs.filter((job) => job.status === "queued" || job.status === "running");
-    for (const job of running) {
+    const { data: fresh } = await supabase
+      .from("processing_jobs")
+      .select("id, status")
+      .eq("video_id", videoId)
+      .eq("user_id", userId)
+      .in("status", ["queued", "running"]);
+    for (const job of fresh ?? []) {
       await setJob(supabase, job.id, {
         status: "failed",
         error: message,
