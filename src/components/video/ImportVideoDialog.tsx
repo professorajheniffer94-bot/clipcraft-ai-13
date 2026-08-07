@@ -27,7 +27,8 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { projectsApi } from "@/api/queries";
 import { importVideoFromUrl, registerUploadedVideo } from "@/lib/pipeline.functions";
-import { CLIP_DURATIONS, STORAGE_BUCKET } from "@/constants/app";
+import { CLIP_DURATIONS, MAX_UPLOAD_BYTES, STORAGE_BUCKET } from "@/constants/app";
+import { formatBytes } from "@/utils/format";
 import { importUrlSchema } from "@/utils/validation";
 import { withRetry } from "@/lib/retry";
 
