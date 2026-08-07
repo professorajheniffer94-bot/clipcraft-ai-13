@@ -206,6 +206,6 @@ export const exportsApi = {
     );
 
     const { data: signed } = await supabase.storage.from("videos").createSignedUrl(path, 60 * 60);
-    return { export: row, url: signed?.signedUrl ?? "" };
+    return { export: row as ExportRow, url: signed?.signedUrl ?? "" };
   },
 };

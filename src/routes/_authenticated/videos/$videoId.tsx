@@ -102,7 +102,7 @@ function VideoDetailPage() {
 
   const jobList = jobs.data ?? [];
   const stuck = jobList.filter((job) => job.status === "failed" || job.status === "cancelled");
-  const words = ((transcription.data?.words ?? []) as unknown as TranscriptWord[]) ?? [];
+  const words = (transcription.data?.words ?? []) as unknown as TranscriptWord[];
   const loadError = (video.error ?? jobs.error ?? clips.error) as Error | null;
 
   return (
