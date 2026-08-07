@@ -28,6 +28,9 @@ export const importVideoFromUrl = createServerFn({ method: "POST" })
     const { PIPELINE_STAGES, isPipelineReady, pipelineBlockedReason } = await import(
       "./pipeline.server"
     );
+    const { mediaUrlProblem } = await import("./media-url");
+    const problem = mediaUrlProblem(data.url);
+    if (problem) throw new Error(problem);
     const { supabase, userId } = context;
     const blocked = pipelineBlockedReason();
 
