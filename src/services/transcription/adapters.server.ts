@@ -62,7 +62,19 @@ const groq: TranscriptionProvider = {
   id: "groq",
   async transcribe({ audioUrl, language }: TranscriptionRequest) {
     const media = await fetch(audioUrl);
-    if (!media.ok) throw new Error(`Unable to read media [${media.status}]`);
+    if (!media.ok) {
+      throw new Error(
+        media.status === 429
+          ? "The source refused the download (rate limited). Use a direct file link or upload the video file."
+          : `Unable to read media [${media.status}]`,
+      );
+    }
+    const contentType = media.headers.get("content-type") ?? "";
+    if (/^text\/|application\/(x)?html|json/i.test(contentType)) {
+      throw new Error(
+        "That link returned a web page instead of a media file. Upload the video file or use a direct .mp4/.mp3 link.",
+      );
+    }
     const form = new FormData();
     form.append("file", await media.blob(), "media.mp4");
     form.append("model", process.env["GROQ_TRANSCRIPTION_MODEL"] ?? "whisper-large-v3");

@@ -1,0 +1,2 @@
+UPDATE public.videos SET status = 'failed', error = 'Social platform links (YouTube, TikTok, Instagram) cannot be downloaded automatically. Download the file and upload it instead.' WHERE source = 'url' AND status = 'pending';
+UPDATE public.processing_jobs SET status = 'failed', error = 'Source link could not be downloaded. Upload the video file instead.', finished_at = now() WHERE status IN ('queued','running') AND video_id IN (SELECT id FROM public.videos WHERE source = 'url' AND status = 'failed');

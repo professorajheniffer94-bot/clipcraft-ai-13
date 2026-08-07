@@ -31,9 +31,10 @@ import { CLIP_DURATIONS, MAX_UPLOAD_BYTES, STORAGE_BUCKET } from "@/constants/ap
 import { formatBytes } from "@/utils/format";
 import { importUrlSchema } from "@/utils/validation";
 import { withRetry } from "@/lib/retry";
+import { mediaUrlProblem } from "@/lib/media-url";
 
 const NO_PROJECT = "none";
-const PLATFORMS = ["YouTube", "TikTok", "Instagram", "Drive"];
+const FORMATS = ["MP4", "MOV", "WEBM", "MP3", "M4A"];
 
 export function ImportVideoDialog({ projectId }: { projectId?: string }) {
   const [open, setOpen] = useState(false);
@@ -133,6 +134,7 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
 
   const busy = urlMutation.isPending || uploadMutation.isPending;
   const failure = (urlMutation.error ?? uploadMutation.error) as Error | null;
+  const urlProblem = url.trim().length > 0 ? mediaUrlProblem(url.trim()) : null;
 
   return (
     <Dialog
@@ -227,7 +229,7 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
               />
             </div>
             <div className="flex flex-wrap gap-2">
-              {PLATFORMS.map((platform) => (
+              {FORMATS.map((platform) => (
                 <span
                   key={platform}
                   className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground"
@@ -236,7 +238,13 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
                 </span>
               ))}
             </div>
-            {url.trim().length > 0 ? (
+            {urlProblem ? (
+              <Alert variant="destructive">
+                <AlertCircle className="size-4" />
+                <AlertTitle>Link not supported</AlertTitle>
+                <AlertDescription>{urlProblem}</AlertDescription>
+              </Alert>
+            ) : url.trim().length > 0 ? (
               <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
                 <span className="grid h-10 w-16 place-items-center rounded bg-primary/15 text-primary">
                   <Link2 className="size-4" />
@@ -249,13 +257,14 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
             ) : null}
             <Button
               className="w-full"
-              disabled={busy || url.trim().length === 0}
+              disabled={busy || url.trim().length === 0 || Boolean(urlProblem)}
               onClick={() => urlMutation.mutate()}
             >
               {urlMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Queue import"}
             </Button>
             <p className="text-center text-xs text-muted-foreground">
-              Videos up to 2h — the pipeline downloads and processes automatically.
+              Direct video/audio file links only. For YouTube, TikTok or Instagram, download the file
+              and use the Upload tab.
             </p>
           </TabsContent>
 
