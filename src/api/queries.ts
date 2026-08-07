@@ -186,7 +186,7 @@ export const exportsApi = {
       .upload(path, input.blob, { contentType: "video/mp4", upsert: true });
     if (uploadError) throw new Error(uploadError.message);
 
-    const row = unwrap(
+    const row = unwrap<ExportRow>(
       await supabase
         .from("exports")
         .insert({
@@ -206,6 +206,6 @@ export const exportsApi = {
     );
 
     const { data: signed } = await supabase.storage.from("videos").createSignedUrl(path, 60 * 60);
-    return { export: row as ExportRow, url: signed?.signedUrl ?? "" };
+    return { export: row, url: signed?.signedUrl ?? "" };
   },
 };
