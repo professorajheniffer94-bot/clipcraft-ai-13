@@ -71,31 +71,48 @@ export async function resolveYoutubeMedia(
   if (!base) throw new Error(youtubeImportBlockedReason() ?? "YouTube import is not configured.");
   const apiKey = process.env["COBALT_API_KEY"];
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30_000);
+  const endpoint = base.replace(/\/$/, "") + "/";
+  const body = JSON.stringify({
+    url: `https://www.youtube.com/watch?v=${videoId}`,
+    downloadMode: mode === "audio" ? "audio" : "auto",
+    audioFormat: "mp3",
+    videoQuality: "720",
+    youtubeVideoCodec: "h264",
+    filenameStyle: "basic",
+  });
+
+  // Free hosting (e.g. Render) sleeps idle instances: the first call can take
+  // 30-60s extra to wake up, so we allow a long timeout and one retry.
+  const attempt = async (timeoutMs: number) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(endpoint, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+          ...(apiKey ? { authorization: `Api-Key ${apiKey}` } : {}),
+        },
+        body,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
   let response: Response;
   try {
-    response = await fetch(base.replace(/\/$/, "") + "/", {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json",
-        ...(apiKey ? { authorization: `Api-Key ${apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        url: `https://www.youtube.com/watch?v=${videoId}`,
-        downloadMode: mode === "audio" ? "audio" : "auto",
-        audioFormat: "mp3",
-        videoQuality: "720",
-        youtubeVideoCodec: "h264",
-        filenameStyle: "basic",
-      }),
-    });
+    response = await attempt(90_000);
   } catch {
-    throw new Error("The download service did not respond. Try again in a moment.");
-  } finally {
-    clearTimeout(timer);
+    try {
+      response = await attempt(60_000);
+    } catch {
+      throw new Error(
+        "The download service did not respond (it may still be waking up from sleep on free hosting). Wait a minute and try again.",
+      );
+    }
   }
 
   const payload = (await response.json().catch(() => null)) as
