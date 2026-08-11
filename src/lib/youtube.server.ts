@@ -85,7 +85,7 @@ async function requestYoutubeMedia(
   videoId: string,
   mode: "video" | "audio",
   useHls = false,
-): Promise<ResolvedMedia> {
+): Promise<ResolvedMediaWithFallback> {
   const base = process.env["COBALT_API_URL"];
   if (!base) throw new Error(youtubeImportBlockedReason() ?? "YouTube import is not configured.");
   const apiKey = process.env["COBALT_API_KEY"];
@@ -188,7 +188,7 @@ async function requestYoutubeMedia(
 export async function resolveYoutubeMedia(
   videoId: string,
   mode: "video" | "audio",
-): Promise<ResolvedMedia> {
+): Promise<ResolvedMediaWithFallback> {
   if (mode === "audio") return requestYoutubeMedia(videoId, "audio");
   // YouTube blocks datacenter IPs unpredictably, so try progressively weaker
   // strategies: normal video -> audio-only -> HLS (different YouTube client).
