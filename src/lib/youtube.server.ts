@@ -194,8 +194,9 @@ export async function resolveYoutubeMedia(
   // strategies: normal video -> audio-only -> HLS (different YouTube client).
   const attempts: Array<[("video" | "audio"), boolean]> = [
     ["video", false],
-    ["audio", false],
     ["video", true],
+    ["video", false],
+    ["audio", false],
     ["audio", true],
   ];
   let lastError: unknown;
