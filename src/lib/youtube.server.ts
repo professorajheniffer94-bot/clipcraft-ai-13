@@ -1,3 +1,13 @@
+class YoutubeMediaError extends Error {
+  /** When true, retrying with another download mode cannot help. */
+  readonly fatal: boolean;
+  constructor(message: string, fatal: boolean) {
+    super(message);
+    this.name = "YoutubeMediaError";
+    this.fatal = fatal;
+  }
+}
+
 /**
  * YouTube link import.
  *
@@ -123,17 +133,27 @@ async function requestYoutubeMedia(
 
   if (payload.status === "error" || !payload.url) {
     const code = payload.error?.code ?? "";
-    if (/private|login|auth|consent|age/i.test(code)) {
-      throw new Error("This video is private or requires sign-in, so it cannot be imported.");
-    }
     if (/unavailable|not.?found|removed/i.test(code)) {
-      throw new Error("This video is unavailable or was removed.");
+      throw new YoutubeMediaError("This video is unavailable or was removed.", true);
     }
-    if (/live/i.test(code)) throw new Error("Live streams cannot be imported. Wait until the replay is published.");
-    if (/rate|limit/i.test(code)) throw new Error("The download service is rate limited right now. Try again shortly.");
-    if (/length|duration/i.test(code)) throw new Error("This video is longer than the download service allows.");
-    throw new Error(
+    if (/live/i.test(code))
+      throw new YoutubeMediaError("Live streams cannot be imported. Wait until the replay is published.", true);
+    if (/length|duration/i.test(code))
+      throw new YoutubeMediaError("This video is longer than the download service allows.", true);
+    if (/rate|limit/i.test(code))
+      throw new YoutubeMediaError("The download service is rate limited right now. Try again shortly.", false);
+    if (/private|login|auth|consent|age|bot|captcha/i.test(code)) {
+      // YouTube frequently demands sign-in only for the video stream when the
+      // request comes from a datacenter IP — audio-only often still works,
+      // so this is NOT fatal.
+      throw new YoutubeMediaError(
+        "YouTube asked this download service to sign in (common for cloud servers). Trying audio-only, or upload the file instead.",
+        false,
+      );
+    }
+    throw new YoutubeMediaError(
       `The download service could not fetch this YouTube video (${code || response.status}). YouTube often blocks video streams from cloud servers; audio still works.`,
+      false,
     );
   }
 
@@ -159,9 +179,8 @@ export async function resolveYoutubeMedia(
   try {
     return await requestYoutubeMedia(videoId, "video");
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    // Hard failures (private, removed, live, too long) must not be retried as audio.
-    if (/private|sign-in|unavailable|removed|Live streams|longer than/i.test(message)) throw error;
+    // Only truly hard failures (removed, live, too long) skip the audio retry.
+    if (error instanceof YoutubeMediaError && error.fatal) throw error;
     return requestYoutubeMedia(videoId, "audio");
   }
 }
