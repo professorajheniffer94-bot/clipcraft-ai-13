@@ -178,13 +178,27 @@ export async function resolveYoutubeMedia(
   mode: "video" | "audio",
 ): Promise<ResolvedMedia> {
   if (mode === "audio") return requestYoutubeMedia(videoId, "audio");
-  try {
-    return await requestYoutubeMedia(videoId, "video");
-  } catch (error) {
-    // Only truly hard failures (removed, live, too long) skip the audio retry.
-    if (error instanceof YoutubeMediaError && error.fatal) throw error;
-    return requestYoutubeMedia(videoId, "audio");
+  // YouTube blocks datacenter IPs unpredictably, so try progressively weaker
+  // strategies: normal video -> audio-only -> HLS (different YouTube client).
+  const attempts: Array<[("video" | "audio"), boolean]> = [
+    ["video", false],
+    ["audio", false],
+    ["video", true],
+    ["audio", true],
+  ];
+  let lastError: unknown;
+  for (const [attemptMode, useHls] of attempts) {
+    try {
+      return await requestYoutubeMedia(videoId, attemptMode, useHls);
+    } catch (error) {
+      if (error instanceof YoutubeMediaError && error.fatal) throw error;
+      lastError = error;
+    }
   }
+  throw new Error(
+    "YouTube is blocking this download service right now (it demands sign-in from cloud servers). Download the video yourself and use the Upload tab, or point COBALT_API_URL at an instance with YouTube cookies configured." +
+      (lastError instanceof Error ? ` Last reason: ${lastError.message}` : ""),
+  );
 }
 
 function rewriteToBase(mediaUrl: string, endpoint: string): string {
