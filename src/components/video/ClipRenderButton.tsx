@@ -24,6 +24,12 @@ export function ClipRenderButton({ clip, video, words }: Props) {
   const [status, setStatus] = useState("");
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
+  // Audio-only imports (YouTube blocks video streams for cloud downloaders)
+  // can be transcribed and analysed, but there is no picture to reframe.
+  const audioOnly =
+    (video.metadata as { media_kind?: string } | null)?.media_kind === "audio" ||
+    (video.storage_path ?? "").toLowerCase().endsWith(".mp3");
+
   async function render() {
     setBusy(true);
     setProgress(0);
@@ -63,7 +69,7 @@ export function ClipRenderButton({ clip, video, words }: Props) {
   return (
     <div className="mt-3 space-y-2">
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => void render()}>
+        <Button size="sm" variant="outline" disabled={busy || audioOnly} onClick={() => void render()}>
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Scissors className="size-4" />}
           Render 9:16 + captions
         </Button>
@@ -75,6 +81,12 @@ export function ClipRenderButton({ clip, video, words }: Props) {
           </Button>
         ) : null}
       </div>
+      {audioOnly ? (
+        <p className="text-xs text-muted-foreground">
+          This import is audio-only, so transcript and viral moments work but there is no video to
+          reframe. Upload the video file to render this clip in 9:16.
+        </p>
+      ) : null}
       {busy ? (
         <div>
           <Progress value={progress} className="h-1.5" />
