@@ -33,6 +33,9 @@ export interface ResolvedMedia {
   kind: "video" | "audio";
 }
 
+/** Set once the instance answered, so cold-start timeouts apply only once. */
+let instanceWoken = false;
+
 export { youtubeVideoId } from "./youtube-url";
 
 /** Confirms the video exists and is publicly reachable (free, no API key). */
@@ -93,8 +96,9 @@ async function requestYoutubeMedia(
     ...(useHls ? { youtubeHLS: true } : {}),
   });
 
-  // Free hosting (e.g. Render) sleeps idle instances: the first call can take
-  // 30-60s extra to wake up, so we allow a long timeout and one retry.
+  // Free hosting (e.g. Render) sleeps idle instances: the FIRST call can take
+  // 30-60s extra to wake up. Later calls must be quick, otherwise the fallback
+  // chain (video -> audio -> HLS) can hang the request for minutes.
   const attempt = async (timeoutMs: number) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -116,10 +120,12 @@ async function requestYoutubeMedia(
 
   let response: Response;
   try {
-    response = await attempt(90_000);
+    response = await attempt(instanceWoken ? 35_000 : 90_000);
+    instanceWoken = true;
   } catch {
     try {
-      response = await attempt(60_000);
+      response = await attempt(45_000);
+      instanceWoken = true;
     } catch {
       throw new Error(
         "The download service did not respond (it may still be waking up from sleep on free hosting). Wait a minute and try again.",
