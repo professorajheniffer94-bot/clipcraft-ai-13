@@ -63,7 +63,7 @@ export function youtubeImportBlockedReason(): string | null {
 }
 
 /** Asks the cobalt instance for a direct media URL for this YouTube video. */
-export async function resolveYoutubeMedia(
+async function requestYoutubeMedia(
   videoId: string,
   mode: "video" | "audio",
 ): Promise<ResolvedMedia> {
@@ -123,7 +123,7 @@ export async function resolveYoutubeMedia(
 
   if (payload.status === "error" || !payload.url) {
     const code = payload.error?.code ?? "";
-    if (/private|login|auth/i.test(code)) {
+    if (/private|login|auth|consent|age/i.test(code)) {
       throw new Error("This video is private or requires sign-in, so it cannot be imported.");
     }
     if (/unavailable|not.?found|removed/i.test(code)) {
@@ -132,7 +132,9 @@ export async function resolveYoutubeMedia(
     if (/live/i.test(code)) throw new Error("Live streams cannot be imported. Wait until the replay is published.");
     if (/rate|limit/i.test(code)) throw new Error("The download service is rate limited right now. Try again shortly.");
     if (/length|duration/i.test(code)) throw new Error("This video is longer than the download service allows.");
-    throw new Error(`The video could not be downloaded (${code || response.status}).`);
+    throw new Error(
+      `The download service could not fetch this YouTube video (${code || response.status}). YouTube often blocks video streams from cloud servers; audio still works.`,
+    );
   }
 
   return {
@@ -142,6 +144,26 @@ export async function resolveYoutubeMedia(
     filename: payload.filename ?? `${videoId}.${mode === "audio" ? "mp3" : "mp4"}`,
     kind: mode,
   };
+}
+
+/**
+ * Resolves the media, falling back to audio-only when YouTube blocks the video
+ * stream for the download service (common on cloud/datacenter IPs). Audio is
+ * enough for transcription + AI analysis, so the pipeline still runs.
+ */
+export async function resolveYoutubeMedia(
+  videoId: string,
+  mode: "video" | "audio",
+): Promise<ResolvedMedia> {
+  if (mode === "audio") return requestYoutubeMedia(videoId, "audio");
+  try {
+    return await requestYoutubeMedia(videoId, "video");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // Hard failures (private, removed, live, too long) must not be retried as audio.
+    if (/private|sign-in|unavailable|removed|Live streams|longer than/i.test(message)) throw error;
+    return requestYoutubeMedia(videoId, "audio");
+  }
 }
 
 function rewriteToBase(mediaUrl: string, endpoint: string): string {
