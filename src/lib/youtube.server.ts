@@ -146,6 +146,12 @@ async function requestYoutubeMedia(
 
   if (payload.status === "error" || !payload.url) {
     const code = payload.error?.code ?? "";
+    console.warn("YouTube extraction rejected", {
+      httpStatus: response.status,
+      code: code || "missing-media-url",
+      mode,
+      useHls,
+    });
     if (/unavailable|not.?found|removed/i.test(code)) {
       throw new YoutubeMediaError("This video is unavailable or was removed.", true);
     }
@@ -190,13 +196,13 @@ export async function resolveYoutubeMedia(
   mode: "video" | "audio",
 ): Promise<ResolvedMediaWithFallback> {
   if (mode === "audio") return requestYoutubeMedia(videoId, "audio");
-  // YouTube blocks datacenter IPs unpredictably, so try progressively weaker
-  // strategies: normal video -> audio-only -> HLS (different YouTube client).
+  // YouTube blocks datacenter IPs unpredictably, so try each genuinely distinct
+  // strategy once. The old sequence repeated normal video, delaying the same
+  // inevitable provider error without increasing the chance of success.
   const attempts: Array<[("video" | "audio"), boolean]> = [
     ["video", false],
-    ["video", true],
-    ["video", false],
     ["audio", false],
+    ["video", true],
     ["audio", true],
   ];
   let lastError: unknown;
@@ -209,8 +215,8 @@ export async function resolveYoutubeMedia(
     }
   }
   throw new Error(
-    "YouTube is blocking this download service right now (it demands sign-in from cloud servers). Download the video yourself and use the Upload tab, or point COBALT_API_URL at an instance with YouTube cookies configured." +
-      (lastError instanceof Error ? ` Last reason: ${lastError.message}` : ""),
+    "YouTube blocked every extraction mode used by the configured download service. This is not a bad link: the service needs fresh YouTube cookies or a residential exit IP. Until that instance is updated, download the file and use Upload." +
+      (lastError instanceof Error ? ` Provider response: ${lastError.message}` : ""),
   );
 }
 
