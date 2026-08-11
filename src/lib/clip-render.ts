@@ -3,7 +3,15 @@ import { fetchFile, toBlobURL } from "@ffmpeg/util";
 
 import type { CaptionChunk } from "./captions";
 
-const CORE_BASE = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd";
+import wasmAsset from "./ffmpeg-core-wasm.asset.json";
+
+/**
+ * The ffmpeg.wasm core is served from our own origin: loading it from a public
+ * CDN failed with "Failed to fetch" because the page's content-security policy
+ * blocks third-party script/wasm origins.
+ */
+const CORE_JS_URL = "/ffmpeg/ffmpeg-core.js";
+const CORE_WASM_URL = wasmAsset.url;
 
 /**
  * ffmpeg.wasm runs inside a single 32-bit heap (hard ~2GB ceiling, much less on
@@ -42,8 +50,8 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
 async function createFFmpeg(): Promise<FFmpeg> {
   const ffmpeg = new FFmpeg();
   await ffmpeg.load({
-    coreURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, "text/javascript"),
-    wasmURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, "application/wasm"),
+    coreURL: await toBlobURL(CORE_JS_URL, "text/javascript"),
+    wasmURL: CORE_WASM_URL,
   });
   return ffmpeg;
 }
