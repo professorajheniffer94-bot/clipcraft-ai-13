@@ -136,10 +136,26 @@ export async function resolveYoutubeMedia(
   }
 
   return {
-    url: payload.url,
+    // The instance may advertise a stale API_URL, so tunnel links can point at a
+    // host that no longer answers. Rewrite the origin to the configured base.
+    url: rewriteToBase(payload.url, endpoint),
     filename: payload.filename ?? `${videoId}.${mode === "audio" ? "mp3" : "mp4"}`,
     kind: mode,
   };
+}
+
+function rewriteToBase(mediaUrl: string, endpoint: string): string {
+  try {
+    const target = new URL(mediaUrl);
+    const base = new URL(endpoint);
+    if (target.origin !== base.origin) {
+      target.protocol = base.protocol;
+      target.host = base.host;
+    }
+    return target.toString();
+  } catch {
+    return mediaUrl;
+  }
 }
 
 /** Downloads the resolved file, enforcing the plan's size ceiling. */
