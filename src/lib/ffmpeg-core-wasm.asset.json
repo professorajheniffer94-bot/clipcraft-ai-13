@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "asset_id": "c2c1227b-d086-407c-8f2a-f52e936473d7",
+  "project_id": "9582b62c-883b-4c92-8457-a8c344e67bea",
+  "url": "/__l5e/assets-v1/c2c1227b-d086-407c-8f2a-f52e936473d7/ffmpeg-core.wasm",
+  "r2_key": "a/v1/9582b62c-883b-4c92-8457-a8c344e67bea/c2c1227b-d086-407c-8f2a-f52e936473d7/ffmpeg-core.wasm",
+  "original_filename": "ffmpeg-core.wasm",
+  "size": 32232419,
+  "content_type": "application/wasm",
+  "created_at": "2026-08-11T00:45:56Z"
+}
