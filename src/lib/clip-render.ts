@@ -5,6 +5,18 @@ import type { CaptionChunk } from "./captions";
 
 const CORE_BASE = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd";
 
+/**
+ * ffmpeg.wasm runs in a single 32-bit heap (hard ~2GB ceiling, far less in
+ * practice on mobile). Two things used to blow it up:
+ *   1. dozens of full-frame 1080x1920 PNG overlays kept in memory at once;
+ *   2. reusing one FFmpeg instance across clips, so every render added to the
+ *      same heap until an out-of-memory abort killed the batch halfway.
+ * So captions are now drawn into a small band-sized PNG, the number of
+ * overlays is capped, renders are serialised through a queue, and the instance
+ * is terminated after each clip.
+ */
+const MAX_OVERLAYS = 24;
+
 export interface RenderClipOptions {
   /** Direct/signed URL to the source video. */
   sourceUrl: string;
