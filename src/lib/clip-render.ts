@@ -10,7 +10,7 @@ import wasmAsset from "./ffmpeg-core-wasm.asset.json";
  * CDN failed with "Failed to fetch" because the page's content-security policy
  * blocks third-party script/wasm origins.
  */
-const CORE_JS_URL = "/ffmpeg/ffmpeg-core.js";
+const CORE_JS_URL = "/ffmpeg/ffmpeg-core.esm.js";
 const CORE_WASM_URL = wasmAsset.url;
 
 /**
