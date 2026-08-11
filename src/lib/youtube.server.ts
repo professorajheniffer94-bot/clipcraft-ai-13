@@ -76,6 +76,7 @@ export function youtubeImportBlockedReason(): string | null {
 async function requestYoutubeMedia(
   videoId: string,
   mode: "video" | "audio",
+  useHls = false,
 ): Promise<ResolvedMedia> {
   const base = process.env["COBALT_API_URL"];
   if (!base) throw new Error(youtubeImportBlockedReason() ?? "YouTube import is not configured.");
@@ -89,6 +90,7 @@ async function requestYoutubeMedia(
     videoQuality: "720",
     youtubeVideoCodec: "h264",
     filenameStyle: "basic",
+    ...(useHls ? { youtubeHLS: true } : {}),
   });
 
   // Free hosting (e.g. Render) sleeps idle instances: the first call can take
