@@ -33,6 +33,11 @@ export interface ResolvedMedia {
   kind: "video" | "audio";
 }
 
+/** URL exactly as advertised by the service, used as a download fallback. */
+export interface ResolvedMediaWithFallback extends ResolvedMedia {
+  fallbackUrl?: string;
+}
+
 /** Set once the instance answered, so cold-start timeouts apply only once. */
 let instanceWoken = false;
 
@@ -169,6 +174,7 @@ async function requestYoutubeMedia(
     // The instance may advertise a stale API_URL, so tunnel links can point at a
     // host that no longer answers. Rewrite the origin to the configured base.
     url: rewriteToBase(payload.url, endpoint),
+    fallbackUrl: payload.url,
     filename: payload.filename ?? `${videoId}.${mode === "audio" ? "mp3" : "mp4"}`,
     kind: mode,
   };
@@ -223,10 +229,16 @@ function rewriteToBase(mediaUrl: string, endpoint: string): string {
 
 /** Downloads the resolved file, enforcing the plan's size ceiling. */
 export async function downloadResolvedMedia(
-  media: ResolvedMedia,
+  media: ResolvedMediaWithFallback,
   maxBytes: number,
 ): Promise<{ bytes: Uint8Array; contentType: string }> {
-  const response = await fetch(media.url);
+  let response = await fetch(media.url).catch(() => null);
+  // Some instances advertise a stale host; if the rewritten tunnel is rejected,
+  // fall back to the URL the service returned verbatim.
+  if ((!response || !response.ok) && media.fallbackUrl && media.fallbackUrl !== media.url) {
+    response = (await fetch(media.fallbackUrl).catch(() => null)) ?? response;
+  }
+  if (!response) throw new Error("The download service did not answer the download request.");
   if (!response.ok) {
     throw new Error(
       response.status === 429
