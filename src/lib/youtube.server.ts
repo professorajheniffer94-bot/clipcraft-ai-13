@@ -33,6 +33,14 @@ export interface ResolvedMedia {
   kind: "video" | "audio";
 }
 
+/** URL exactly as advertised by the service, used as a download fallback. */
+export interface ResolvedMediaWithFallback extends ResolvedMedia {
+  fallbackUrl?: string;
+}
+
+/** Set once the instance answered, so cold-start timeouts apply only once. */
+let instanceWoken = false;
+
 export { youtubeVideoId } from "./youtube-url";
 
 /** Confirms the video exists and is publicly reachable (free, no API key). */
@@ -77,7 +85,7 @@ async function requestYoutubeMedia(
   videoId: string,
   mode: "video" | "audio",
   useHls = false,
-): Promise<ResolvedMedia> {
+): Promise<ResolvedMediaWithFallback> {
   const base = process.env["COBALT_API_URL"];
   if (!base) throw new Error(youtubeImportBlockedReason() ?? "YouTube import is not configured.");
   const apiKey = process.env["COBALT_API_KEY"];
@@ -93,8 +101,9 @@ async function requestYoutubeMedia(
     ...(useHls ? { youtubeHLS: true } : {}),
   });
 
-  // Free hosting (e.g. Render) sleeps idle instances: the first call can take
-  // 30-60s extra to wake up, so we allow a long timeout and one retry.
+  // Free hosting (e.g. Render) sleeps idle instances: the FIRST call can take
+  // 30-60s extra to wake up. Later calls must be quick, otherwise the fallback
+  // chain (video -> audio -> HLS) can hang the request for minutes.
   const attempt = async (timeoutMs: number) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -116,10 +125,12 @@ async function requestYoutubeMedia(
 
   let response: Response;
   try {
-    response = await attempt(90_000);
+    response = await attempt(instanceWoken ? 35_000 : 90_000);
+    instanceWoken = true;
   } catch {
     try {
-      response = await attempt(60_000);
+      response = await attempt(45_000);
+      instanceWoken = true;
     } catch {
       throw new Error(
         "The download service did not respond (it may still be waking up from sleep on free hosting). Wait a minute and try again.",
@@ -163,6 +174,7 @@ async function requestYoutubeMedia(
     // The instance may advertise a stale API_URL, so tunnel links can point at a
     // host that no longer answers. Rewrite the origin to the configured base.
     url: rewriteToBase(payload.url, endpoint),
+    fallbackUrl: payload.url,
     filename: payload.filename ?? `${videoId}.${mode === "audio" ? "mp3" : "mp4"}`,
     kind: mode,
   };
@@ -176,14 +188,15 @@ async function requestYoutubeMedia(
 export async function resolveYoutubeMedia(
   videoId: string,
   mode: "video" | "audio",
-): Promise<ResolvedMedia> {
+): Promise<ResolvedMediaWithFallback> {
   if (mode === "audio") return requestYoutubeMedia(videoId, "audio");
   // YouTube blocks datacenter IPs unpredictably, so try progressively weaker
   // strategies: normal video -> audio-only -> HLS (different YouTube client).
   const attempts: Array<[("video" | "audio"), boolean]> = [
     ["video", false],
-    ["audio", false],
     ["video", true],
+    ["video", false],
+    ["audio", false],
     ["audio", true],
   ];
   let lastError: unknown;
@@ -217,10 +230,16 @@ function rewriteToBase(mediaUrl: string, endpoint: string): string {
 
 /** Downloads the resolved file, enforcing the plan's size ceiling. */
 export async function downloadResolvedMedia(
-  media: ResolvedMedia,
+  media: ResolvedMediaWithFallback,
   maxBytes: number,
 ): Promise<{ bytes: Uint8Array; contentType: string }> {
-  const response = await fetch(media.url);
+  let response = await fetch(media.url).catch(() => null);
+  // Some instances advertise a stale host; if the rewritten tunnel is rejected,
+  // fall back to the URL the service returned verbatim.
+  if ((!response || !response.ok) && media.fallbackUrl && media.fallbackUrl !== media.url) {
+    response = (await fetch(media.fallbackUrl).catch(() => null)) ?? response;
+  }
+  if (!response) throw new Error("The download service did not answer the download request.");
   if (!response.ok) {
     throw new Error(
       response.status === 429
