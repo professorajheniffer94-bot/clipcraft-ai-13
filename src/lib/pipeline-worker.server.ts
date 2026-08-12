@@ -60,7 +60,10 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
   if (jobsError) throw new Error(jobsError.message);
 
   const jobs = jobRows ?? [];
-  const pending = jobs.filter((job) => job.status === "queued" || job.status === "running");
+  const pending = jobs.filter(
+    (job) =>
+      !CLIENT_STAGES.includes(job.type) && (job.status === "queued" || job.status === "running"),
+  );
   if (pending.length === 0) return { ok: true, message: "Nothing to process" };
 
   const jobFor = (stage: Stage) => jobs.find((job) => job.type === stage);
@@ -118,7 +121,9 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
         provider: video.source === "youtube" ? "cobalt" : "direct",
         result: {
           source: video.storage_path ? "storage" : "url",
-          media_kind: (video.metadata as Record<string, unknown>)["media_kind"] ?? "video",
+          media_kind: String(
+            (video.metadata as Record<string, unknown>)["media_kind"] ?? "video",
+          ),
         },
       });
     }
@@ -180,7 +185,10 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
     // 2. AI picks the strongest moments.
     let moments: AnalyzedMoment[] = [];
     const analysisJob = jobFor("ai_analysis");
-    if (analysisJob) {
+    if (analysisJob?.status === "succeeded") {
+      const saved = analysisJob.result as { moments?: AnalyzedMoment[] } | null;
+      moments = Array.isArray(saved?.moments) ? saved.moments : [];
+    } else if (analysisJob) {
       await setJob(supabase, analysisJob.id, {
         status: "running",
         progress: 20,
@@ -207,7 +215,7 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
 
     // 3. Persist the clips (vertical 9:16 by default).
     const clipJob = jobFor("clip_generation");
-    if (clipJob && moments.length > 0) {
+    if (clipJob && clipJob.status !== "succeeded" && moments.length > 0) {
       await setJob(supabase, clipJob.id, {
         status: "running",
         progress: 40,

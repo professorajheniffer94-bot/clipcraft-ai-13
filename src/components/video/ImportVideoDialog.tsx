@@ -30,6 +30,7 @@ import { projectsApi } from "@/api/queries";
 import {
   importVideoFromUrl,
   importYouTubeVideo,
+  processVideo,
   registerUploadedVideo,
 } from "@/lib/pipeline.functions";
 import {
@@ -63,9 +64,10 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
   const importUrl = useServerFn(importVideoFromUrl);
   const registerUpload = useServerFn(registerUploadedVideo);
   const importYoutube = useServerFn(importYouTubeVideo);
+  const startProcessing = useServerFn(processVideo);
   const projects = useQuery({ queryKey: ["projects"], queryFn: projectsApi.list });
 
-  function done(message: string) {
+  function done(message: string, videoId?: string) {
     toast.success(message);
     setStatus(null);
     setOpen(false);
@@ -75,6 +77,14 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
     setConsent(false);
     void queryClient.invalidateQueries({ queryKey: ["videos"] });
     void queryClient.invalidateQueries({ queryKey: ["jobs", "active"] });
+    if (videoId) {
+      void startProcessing({ data: { videoId } })
+        .then(() => {
+          void queryClient.invalidateQueries({ queryKey: ["videos"] });
+          void queryClient.invalidateQueries({ queryKey: ["jobs", "active"] });
+        })
+        .catch(() => undefined);
+    }
   }
 
   function retryNotice(attempt: number) {
@@ -97,7 +107,7 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
         { onRetry: retryNotice },
       );
     },
-    onSuccess: () => done("Video queued for processing"),
+    onSuccess: (result) => done("Video queued for processing", result.video.id),
     onError: (error: Error) => {
       setStatus(null);
       toast.error(error.message);
@@ -142,7 +152,7 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
         { onRetry: retryNotice },
       );
     },
-    onSuccess: () => done("Upload registered and queued"),
+    onSuccess: (result) => done("Upload registered and queued", result.video.id),
     onError: (error: Error) => {
       setStatus(null);
       toast.error(error.message);
@@ -169,7 +179,8 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
         { onRetry: retryNotice },
       );
     },
-    onSuccess: () => done("YouTube import queued — processing continues in the library"),
+    onSuccess: (result) =>
+      done("YouTube import queued — processing continues in the library", result.video.id),
     onError: (error: Error) => {
       setStatus(null);
       toast.error(error.message);
