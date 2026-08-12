@@ -96,6 +96,7 @@ function VideoDetailPage() {
       void queryClient.invalidateQueries({ queryKey: ["jobs", videoId] });
       void queryClient.invalidateQueries({ queryKey: ["video", videoId] });
       void queryClient.invalidateQueries({ queryKey: ["jobs", "active"] });
+      if (result.retried > 0) processMutation.mutate();
     },
     onError: (error: Error) => toast.error(error.message),
   });
