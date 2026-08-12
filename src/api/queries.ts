@@ -119,7 +119,7 @@ export const jobsApi = {
       .from("processing_jobs")
       .update(patch)
       .eq("video_id", videoId)
-      .in("type", ["subtitle_render", "video_render"]);
+      .in("type", ["subtitle_render", "video_render", "export"]);
     if (updateError) throw new Error(updateError.message);
   },
 };

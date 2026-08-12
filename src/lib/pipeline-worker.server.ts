@@ -14,7 +14,7 @@ type Stage = Database["public"]["Enums"]["job_type"];
 const MAX_CLIPS = 5;
 
 /** Stages executed in the user's browser (ffmpeg.wasm), not on the server. */
-const CLIENT_STAGES: Stage[] = ["subtitle_render", "video_render"];
+const CLIENT_STAGES: Stage[] = ["subtitle_render", "video_render", "export"];
 
 async function setJob(
   supabase: Client,
@@ -71,9 +71,11 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
 
   await supabase.from("videos").update({ status: "processing", error: null }).eq("id", videoId);
 
+  let activeStage: Stage | null = null;
   try {
     const download = jobFor("download");
     if (download && download.status !== "succeeded") {
+      activeStage = "download";
       await setJob(supabase, download.id, {
         status: "running",
         progress: 10,
@@ -147,6 +149,7 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
         await setJob(supabase, transcriptionJob.id, { status: "succeeded", progress: 100 });
       }
     } else if (transcriptionJob) {
+      activeStage = "transcription";
       await setJob(supabase, transcriptionJob.id, {
         status: "running",
         progress: 10,
@@ -189,6 +192,7 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
       const saved = analysisJob.result as { moments?: AnalyzedMoment[] } | null;
       moments = Array.isArray(saved?.moments) ? saved.moments : [];
     } else if (analysisJob) {
+      activeStage = "ai_analysis";
       await setJob(supabase, analysisJob.id, {
         status: "running",
         progress: 20,
@@ -216,6 +220,7 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
     // 3. Persist the clips (vertical 9:16 by default).
     const clipJob = jobFor("clip_generation");
     if (clipJob && clipJob.status !== "succeeded" && moments.length > 0) {
+      activeStage = "clip_generation";
       await setJob(supabase, clipJob.id, {
         status: "running",
         progress: 40,
@@ -259,8 +264,9 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
       .select("id, status")
       .eq("video_id", videoId)
       .eq("user_id", userId)
-      .in("status", ["queued", "running"]);
+      .eq("status", "running");
     for (const job of fresh ?? []) {
+      if (activeStage && job.id !== jobFor(activeStage)?.id) continue;
       await setJob(supabase, job.id, {
         status: "failed",
         error: message,

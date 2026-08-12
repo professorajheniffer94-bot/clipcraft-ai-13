@@ -8,6 +8,7 @@ export const PIPELINE_STAGES = [
   "clip_generation",
   "subtitle_render",
   "video_render",
+  "export",
 ] as const;
 
 /** A job stuck in `running` longer than this is considered stalled and retryable. */
