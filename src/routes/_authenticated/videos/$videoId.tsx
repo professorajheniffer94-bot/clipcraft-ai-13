@@ -310,14 +310,16 @@ function VideoDetailPage() {
                 {job.error ? (
                   <p className="mt-1 flex items-start justify-between gap-2 text-xs text-destructive">
                     <span className="truncate">{job.error}</span>
-                    <button
+                    <Button
                       type="button"
-                      className="shrink-0 underline"
+                      size="sm"
+                      variant="link"
+                      className="h-auto shrink-0 p-0 text-xs"
                       disabled={retryMutation.isPending}
                       onClick={() => retryMutation.mutate(job.id)}
                     >
                       Retry
-                    </button>
+                    </Button>
                   </p>
                 ) : null}
               </li>

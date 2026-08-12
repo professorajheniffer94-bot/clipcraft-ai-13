@@ -108,12 +108,35 @@ export const jobsApi = {
     error?: string,
   ) {
     const now = new Date().toISOString();
+    let completed = state === "succeeded";
+    let progress = state === "running" ? 15 : 0;
+    if (state === "succeeded") {
+      const clips = unwrap(
+        await supabase.from("clips").select("id").eq("video_id", videoId),
+      );
+      const clipIds = clips.map((clip) => clip.id);
+      const exported =
+        clipIds.length > 0
+          ? unwrap(
+              await supabase
+                .from("exports")
+                .select("clip_id")
+                .in("clip_id", clipIds)
+                .eq("status", "ready"),
+            )
+          : [];
+      const exportedIds = new Set(exported.map((row) => row.clip_id));
+      completed = clipIds.length > 0 && clipIds.every((id) => exportedIds.has(id));
+      progress = clipIds.length > 0 ? Math.round((exportedIds.size / clipIds.length) * 100) : 0;
+    }
     const patch: Tables["processing_jobs"]["Update"] = {
-      status: state,
-      progress: state === "succeeded" ? 100 : state === "running" ? 15 : 0,
+      status: state === "succeeded" ? (completed ? "succeeded" : "queued") : state,
+      progress,
       provider: "browser",
       error: error ?? null,
-      ...(state === "running" ? { started_at: now, finished_at: null } : { finished_at: now }),
+      ...(state === "running"
+        ? { started_at: now, finished_at: null }
+        : { finished_at: completed || state === "failed" ? now : null }),
     };
     const { error: updateError } = await supabase
       .from("processing_jobs")
@@ -121,6 +144,7 @@ export const jobsApi = {
       .eq("video_id", videoId)
       .in("type", ["subtitle_render", "video_render", "export"]);
     if (updateError) throw new Error(updateError.message);
+    return { completed, progress };
   },
 };
 
