@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef } from "react";
-import { AlertCircle, ArrowLeft, Loader2, Play, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowLeft, Loader2, Play, RefreshCw, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/layout/AppShell";
@@ -15,7 +15,11 @@ import { clipsApi, jobsApi, transcriptionsApi, videosApi } from "@/api/queries";
 import { ClipRenderButton } from "@/components/video/ClipRenderButton";
 import { JOB_LABELS } from "@/constants/app";
 import { formatDuration, relativeTime } from "@/utils/format";
-import { processVideo, retryVideoPipeline } from "@/lib/pipeline.functions";
+import {
+  continueYouTubeAsAudio,
+  processVideo,
+  retryVideoPipeline,
+} from "@/lib/pipeline.functions";
 import type { TranscriptWord } from "@/services/providers/types";
 import { isTransientError } from "@/lib/retry";
 
@@ -89,6 +93,15 @@ function VideoDetailPage() {
   }, [video.data?.status, jobs.data, processMutation]);
 
   const runRetry = useServerFn(retryVideoPipeline);
+  const runAudioFallback = useServerFn(continueYouTubeAsAudio);
+  const audioFallbackMutation = useMutation({
+    mutationFn: () => runAudioFallback({ data: { videoId } }),
+    onSuccess: (result) => {
+      toast.success(result.message);
+      processMutation.mutate();
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
   const retryMutation = useMutation({
     mutationFn: (jobId?: string) => runRetry({ data: { videoId, jobId: jobId ?? null } }),
     onSuccess: (result) => {
@@ -96,12 +109,16 @@ function VideoDetailPage() {
       void queryClient.invalidateQueries({ queryKey: ["jobs", videoId] });
       void queryClient.invalidateQueries({ queryKey: ["video", videoId] });
       void queryClient.invalidateQueries({ queryKey: ["jobs", "active"] });
+      if (result.retried > 0) processMutation.mutate();
     },
     onError: (error: Error) => toast.error(error.message),
   });
 
   const jobList = jobs.data ?? [];
   const stuck = jobList.filter((job) => job.status === "failed" || job.status === "cancelled");
+  const youtubeBlocked =
+    video.data?.source === "youtube" &&
+    stuck.some((job) => /sign in|blocked|captcha|cookie|residential|login/i.test(job.error ?? ""));
   const words = (transcription.data?.words ?? []) as unknown as TranscriptWord[];
   const loadError = (video.error ?? jobs.error ?? clips.error) as Error | null;
 
@@ -184,6 +201,28 @@ function VideoDetailPage() {
               )}
               Retry pipeline
             </Button>
+            {youtubeBlocked ? (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={audioFallbackMutation.isPending}
+                  onClick={() => audioFallbackMutation.mutate()}
+                >
+                  {audioFallbackMutation.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Play className="size-4" />
+                  )}
+                  Continue with audio
+                </Button>
+                <Button asChild size="sm" variant="secondary">
+                  <Link to="/library">
+                    <Upload className="size-4" /> Upload the video instead
+                  </Link>
+                </Button>
+              </div>
+            ) : null}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -271,14 +310,16 @@ function VideoDetailPage() {
                 {job.error ? (
                   <p className="mt-1 flex items-start justify-between gap-2 text-xs text-destructive">
                     <span className="truncate">{job.error}</span>
-                    <button
+                    <Button
                       type="button"
-                      className="shrink-0 underline"
+                      size="sm"
+                      variant="link"
+                      className="h-auto shrink-0 p-0 text-xs"
                       disabled={retryMutation.isPending}
                       onClick={() => retryMutation.mutate(job.id)}
                     >
                       Retry
-                    </button>
+                    </Button>
                   </p>
                 ) : null}
               </li>

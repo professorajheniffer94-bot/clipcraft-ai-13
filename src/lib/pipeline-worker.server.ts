@@ -3,6 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { getAnalysisProvider, getTranscriptionProvider } from "@/services/providers/registry.server";
 import type { AnalyzedMoment } from "@/services/providers/types";
+import { MAX_LINK_IMPORT_BYTES, STORAGE_BUCKET } from "@/constants/app";
+import { downloadResolvedMedia, resolveYoutubeMedia } from "./youtube.server";
 
 import { momentToClipInsert, pipelineBlockedReason } from "./pipeline.server";
 
@@ -12,7 +14,7 @@ type Stage = Database["public"]["Enums"]["job_type"];
 const MAX_CLIPS = 5;
 
 /** Stages executed in the user's browser (ffmpeg.wasm), not on the server. */
-const CLIENT_STAGES: Stage[] = ["subtitle_render", "video_render"];
+const CLIENT_STAGES: Stage[] = ["subtitle_render", "video_render", "export"];
 
 async function setJob(
   supabase: Client,
@@ -58,7 +60,10 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
   if (jobsError) throw new Error(jobsError.message);
 
   const jobs = jobRows ?? [];
-  const pending = jobs.filter((job) => job.status === "queued" || job.status === "running");
+  const pending = jobs.filter(
+    (job) =>
+      !CLIENT_STAGES.includes(job.type) && (job.status === "queued" || job.status === "running"),
+  );
   if (pending.length === 0) return { ok: true, message: "Nothing to process" };
 
   const jobFor = (stage: Stage) => jobs.find((job) => job.type === stage);
@@ -66,19 +71,66 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
 
   await supabase.from("videos").update({ status: "processing", error: null }).eq("id", videoId);
 
+  let activeStage: Stage | null = null;
   try {
-    const mediaUrl = await resolveMediaUrl(supabase, video);
-
     const download = jobFor("download");
     if (download && download.status !== "succeeded") {
+      activeStage = "download";
+      await setJob(supabase, download.id, {
+        status: "running",
+        progress: 10,
+        started_at: download.started_at ?? new Date().toISOString(),
+        attempts: download.attempts + 1,
+        error: null,
+      });
+
+      if (video.source === "youtube" && !video.storage_path) {
+        const metadata = video.metadata as Record<string, unknown>;
+        const youtubeId = String(metadata["youtube_id"] ?? "");
+        if (!youtubeId) throw new Error("YouTube import is missing its video identifier");
+        const requested = metadata["requested_media_kind"] === "audio" ? "audio" : "video";
+        await setJob(supabase, download.id, { progress: 30, provider: "cobalt" });
+        const media = await resolveYoutubeMedia(youtubeId, requested);
+        await setJob(supabase, download.id, { progress: 55, provider: "cobalt" });
+        const file = await downloadResolvedMedia(media, MAX_LINK_IMPORT_BYTES);
+        const extension = media.kind === "audio" ? "mp3" : "mp4";
+        const storagePath = `${userId}/youtube/${Date.now()}-${youtubeId}.${extension}`;
+        await setJob(supabase, download.id, { progress: 80 });
+        const { error: uploadError } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .upload(storagePath, file.bytes, { contentType: file.contentType, upsert: true });
+        if (uploadError) throw new Error(uploadError.message);
+        const { error: updateVideoError } = await supabase
+          .from("videos")
+          .update({
+            storage_path: storagePath,
+            size_bytes: file.bytes.byteLength,
+            metadata: { ...metadata, media_kind: media.kind },
+          })
+          .eq("id", videoId)
+          .eq("user_id", userId);
+        if (updateVideoError) throw new Error(updateVideoError.message);
+        video.storage_path = storagePath;
+        video.size_bytes = file.bytes.byteLength;
+        video.metadata = { ...metadata, media_kind: media.kind };
+      }
+
       await setJob(supabase, download.id, {
         status: "succeeded",
         progress: 100,
         started_at: new Date().toISOString(),
         finished_at: new Date().toISOString(),
-        result: { source: video.storage_path ? "storage" : "url" },
+        provider: video.source === "youtube" ? "cobalt" : "direct",
+        result: {
+          source: video.storage_path ? "storage" : "url",
+          media_kind: String(
+            (video.metadata as Record<string, unknown>)["media_kind"] ?? "video",
+          ),
+        },
       });
     }
+
+    const mediaUrl = await resolveMediaUrl(supabase, video);
 
     // 1. Transcription with word-level timestamps.
     let transcriptText = "";
@@ -97,6 +149,7 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
         await setJob(supabase, transcriptionJob.id, { status: "succeeded", progress: 100 });
       }
     } else if (transcriptionJob) {
+      activeStage = "transcription";
       await setJob(supabase, transcriptionJob.id, {
         status: "running",
         progress: 10,
@@ -135,7 +188,11 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
     // 2. AI picks the strongest moments.
     let moments: AnalyzedMoment[] = [];
     const analysisJob = jobFor("ai_analysis");
-    if (analysisJob) {
+    if (analysisJob?.status === "succeeded") {
+      const saved = analysisJob.result as { moments?: AnalyzedMoment[] } | null;
+      moments = Array.isArray(saved?.moments) ? saved.moments : [];
+    } else if (analysisJob) {
+      activeStage = "ai_analysis";
       await setJob(supabase, analysisJob.id, {
         status: "running",
         progress: 20,
@@ -162,7 +219,8 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
 
     // 3. Persist the clips (vertical 9:16 by default).
     const clipJob = jobFor("clip_generation");
-    if (clipJob && moments.length > 0) {
+    if (clipJob && clipJob.status !== "succeeded" && moments.length > 0) {
+      activeStage = "clip_generation";
       await setJob(supabase, clipJob.id, {
         status: "running",
         progress: 40,
@@ -181,17 +239,11 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
       });
     }
 
-    // 4. Cutting + animated subtitles run in the browser on demand.
+    // 4. Browser stages remain queued until an actual export is stored.
     for (const stage of CLIENT_STAGES) {
       const job = jobFor(stage);
-      if (job && job.status !== "succeeded") {
-        await setJob(supabase, job.id, {
-          status: "succeeded",
-          progress: 100,
-          provider: "browser",
-          finished_at: new Date().toISOString(),
-          result: { mode: "client", note: "Rendered in the editor with ffmpeg.wasm" },
-        });
+      if (job && job.status !== "succeeded" && job.status !== "queued") {
+        await setJob(supabase, job.id, { status: "queued", progress: 0, error: null });
       }
     }
 
@@ -212,8 +264,9 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
       .select("id, status")
       .eq("video_id", videoId)
       .eq("user_id", userId)
-      .in("status", ["queued", "running"]);
+      .eq("status", "running");
     for (const job of fresh ?? []) {
+      if (activeStage && job.id !== jobFor(activeStage)?.id) continue;
       await setJob(supabase, job.id, {
         status: "failed",
         error: message,

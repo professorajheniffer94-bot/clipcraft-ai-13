@@ -4,7 +4,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { exportsApi, mediaApi, type ClipRow, type VideoRow } from "@/api/queries";
+import { exportsApi, jobsApi, mediaApi, type ClipRow, type VideoRow } from "@/api/queries";
 import { buildCaptionChunks } from "@/lib/captions";
 import type { TranscriptWord } from "@/services/providers/types";
 
@@ -35,6 +35,7 @@ export function ClipRenderButton({ clip, video, words }: Props) {
     setProgress(0);
     setStatus("Preparing…");
     try {
+      await jobsApi.markClientRender(video.id, "running");
       const { renderVerticalClip } = await import("@/lib/clip-render");
       const sourceUrl = await mediaApi.sourceUrl(video);
       const captions = buildCaptionChunks(words, clip.start_seconds, clip.end_seconds);
@@ -57,9 +58,12 @@ export function ClipRenderButton({ clip, video, words }: Props) {
         fps: 30,
       });
       setDownloadUrl(saved.url || URL.createObjectURL(blob));
+      await jobsApi.markClientRender(video.id, "succeeded");
       toast.success("Clip rendered in 9:16 with captions");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Render failed");
+      const message = error instanceof Error ? error.message : "Render failed";
+      await jobsApi.markClientRender(video.id, "failed", message).catch(() => undefined);
+      toast.error(message);
     } finally {
       setBusy(false);
       setStatus("");
