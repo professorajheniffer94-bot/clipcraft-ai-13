@@ -102,6 +102,26 @@ export const jobsApi = {
         .limit(20),
     );
   },
+  async markClientRender(
+    videoId: string,
+    state: "running" | "succeeded" | "failed",
+    error?: string,
+  ) {
+    const now = new Date().toISOString();
+    const patch: Tables["processing_jobs"]["Update"] = {
+      status: state,
+      progress: state === "succeeded" ? 100 : state === "running" ? 15 : 0,
+      provider: "browser",
+      error: error ?? null,
+      ...(state === "running" ? { started_at: now, finished_at: null } : { finished_at: now }),
+    };
+    const { error: updateError } = await supabase
+      .from("processing_jobs")
+      .update(patch)
+      .eq("video_id", videoId)
+      .in("type", ["subtitle_render", "video_render"]);
+    if (updateError) throw new Error(updateError.message);
+  },
 };
 
 export const brandKitsApi = {

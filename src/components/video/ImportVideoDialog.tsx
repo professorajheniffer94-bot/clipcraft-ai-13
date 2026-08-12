@@ -152,7 +152,7 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
   const youtubeMutation = useMutation({
     mutationFn: async () => {
       if (!consent) throw new Error("You must accept the copyright declaration first");
-      setStatus("Fetching the video from YouTube…");
+      setStatus("Creating a resumable YouTube import…");
       return withRetry(
         () =>
           importYoutube({
@@ -169,7 +169,7 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
         { onRetry: retryNotice },
       );
     },
-    onSuccess: () => done("YouTube video imported and queued"),
+    onSuccess: () => done("YouTube import queued — processing continues in the library"),
     onError: (error: Error) => {
       setStatus(null);
       toast.error(error.message);

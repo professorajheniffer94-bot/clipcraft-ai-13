@@ -3,6 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { getAnalysisProvider, getTranscriptionProvider } from "@/services/providers/registry.server";
 import type { AnalyzedMoment } from "@/services/providers/types";
+import { MAX_LINK_IMPORT_BYTES, STORAGE_BUCKET } from "@/constants/app";
+import { downloadResolvedMedia, resolveYoutubeMedia } from "./youtube.server";
 
 import { momentToClipInsert, pipelineBlockedReason } from "./pipeline.server";
 
@@ -67,18 +69,61 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
   await supabase.from("videos").update({ status: "processing", error: null }).eq("id", videoId);
 
   try {
-    const mediaUrl = await resolveMediaUrl(supabase, video);
-
     const download = jobFor("download");
     if (download && download.status !== "succeeded") {
+      await setJob(supabase, download.id, {
+        status: "running",
+        progress: 10,
+        started_at: download.started_at ?? new Date().toISOString(),
+        attempts: download.attempts + 1,
+        error: null,
+      });
+
+      if (video.source === "youtube" && !video.storage_path) {
+        const metadata = video.metadata as Record<string, unknown>;
+        const youtubeId = String(metadata["youtube_id"] ?? "");
+        if (!youtubeId) throw new Error("YouTube import is missing its video identifier");
+        const requested = metadata["requested_media_kind"] === "audio" ? "audio" : "video";
+        await setJob(supabase, download.id, { progress: 30, provider: "cobalt" });
+        const media = await resolveYoutubeMedia(youtubeId, requested);
+        await setJob(supabase, download.id, { progress: 55, provider: "cobalt" });
+        const file = await downloadResolvedMedia(media, MAX_LINK_IMPORT_BYTES);
+        const extension = media.kind === "audio" ? "mp3" : "mp4";
+        const storagePath = `${userId}/youtube/${Date.now()}-${youtubeId}.${extension}`;
+        await setJob(supabase, download.id, { progress: 80 });
+        const { error: uploadError } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .upload(storagePath, file.bytes, { contentType: file.contentType, upsert: true });
+        if (uploadError) throw new Error(uploadError.message);
+        const { error: updateVideoError } = await supabase
+          .from("videos")
+          .update({
+            storage_path: storagePath,
+            size_bytes: file.bytes.byteLength,
+            metadata: { ...metadata, media_kind: media.kind },
+          })
+          .eq("id", videoId)
+          .eq("user_id", userId);
+        if (updateVideoError) throw new Error(updateVideoError.message);
+        video.storage_path = storagePath;
+        video.size_bytes = file.bytes.byteLength;
+        video.metadata = { ...metadata, media_kind: media.kind };
+      }
+
       await setJob(supabase, download.id, {
         status: "succeeded",
         progress: 100,
         started_at: new Date().toISOString(),
         finished_at: new Date().toISOString(),
-        result: { source: video.storage_path ? "storage" : "url" },
+        provider: video.source === "youtube" ? "cobalt" : "direct",
+        result: {
+          source: video.storage_path ? "storage" : "url",
+          media_kind: (video.metadata as Record<string, unknown>)["media_kind"] ?? "video",
+        },
       });
     }
+
+    const mediaUrl = await resolveMediaUrl(supabase, video);
 
     // 1. Transcription with word-level timestamps.
     let transcriptText = "";
@@ -181,17 +226,11 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
       });
     }
 
-    // 4. Cutting + animated subtitles run in the browser on demand.
+    // 4. Browser stages remain queued until an actual export is stored.
     for (const stage of CLIENT_STAGES) {
       const job = jobFor(stage);
-      if (job && job.status !== "succeeded") {
-        await setJob(supabase, job.id, {
-          status: "succeeded",
-          progress: 100,
-          provider: "browser",
-          finished_at: new Date().toISOString(),
-          result: { mode: "client", note: "Rendered in the editor with ffmpeg.wasm" },
-        });
+      if (job && job.status !== "succeeded" && job.status !== "queued") {
+        await setJob(supabase, job.id, { status: "queued", progress: 0, error: null });
       }
     }
 

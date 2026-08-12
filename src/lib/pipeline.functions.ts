@@ -1,7 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
-import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import {
+  importSchema,
+  registerUploadSchema,
+  retrySchema,
+  runSchema,
+  youtubeSchema,
+} from "./pipeline.schemas";
 
 /** Provider readiness for the pipeline dashboard. Safe for signed-in users. */
 export const getProviderStatus = createServerFn({ method: "GET" })
@@ -10,12 +16,6 @@ export const getProviderStatus = createServerFn({ method: "GET" })
     const { providerStatus, isPipelineReady } = await import("./pipeline.server");
     return { providers: providerStatus(), ready: isPipelineReady() };
   });
-
-const importSchema = z.object({
-  url: z.string().trim().url().max(2048),
-  projectId: z.string().uuid().nullable().optional(),
-  targetDuration: z.number().min(0).max(180).default(0),
-});
 
 /**
  * Registers an external video and queues the full processing pipeline.
@@ -73,14 +73,6 @@ export const importVideoFromUrl = createServerFn({ method: "POST" })
     return { video, queuedStages: PIPELINE_STAGES.length, ready: isPipelineReady() };
   });
 
-const registerUploadSchema = z.object({
-  storagePath: z.string().trim().min(1).max(1024),
-  title: z.string().trim().min(1).max(200),
-  sizeBytes: z.number().int().nonnegative(),
-  projectId: z.string().uuid().nullable().optional(),
-  targetDuration: z.number().min(0).max(180).default(0),
-});
-
 /** Registers an uploaded file (already in storage) and queues the pipeline. */
 export const registerUploadedVideo = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -128,11 +120,6 @@ export const registerUploadedVideo = createServerFn({ method: "POST" })
 
     return { video, ready: isPipelineReady() };
   });
-
-const retrySchema = z.object({
-  videoId: z.string().uuid(),
-  jobId: z.string().uuid().nullable().optional(),
-});
 
 /**
  * Re-queues failed, cancelled or stalled jobs for a video so the pipeline
@@ -194,22 +181,10 @@ export const retryVideoPipeline = createServerFn({ method: "POST" })
     return { retried: retryable.length, message: `${retryable.length} stage(s) re-queued.` };
   });
 
-const runSchema = z.object({ videoId: z.string().uuid() });
-
-const youtubeSchema = z.object({
-  url: z.string().trim().url().max(2048),
-  projectId: z.string().uuid().nullable().optional(),
-  targetDuration: z.number().min(0).max(180).default(0),
-  consent: z.literal(true),
-  consentText: z.string().trim().min(20).max(2000),
-  userAgent: z.string().trim().max(500).optional(),
-  audioOnly: z.boolean().default(false),
-});
-
 /**
- * Imports a YouTube link: records the copyright consent, downloads the media
- * through the configured download service, stores it in the same bucket used
- * by uploads and queues the regular pipeline stages.
+ * Registers a YouTube import and returns immediately. The persisted download
+ * job performs extraction and storage, so a cold provider cannot hold open
+ * the import dialog request.
  */
 export const importYouTubeVideo = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -218,14 +193,9 @@ export const importYouTubeVideo = createServerFn({ method: "POST" })
     const { PIPELINE_STAGES, isPipelineReady, pipelineBlockedReason } = await import(
       "./pipeline.server"
     );
-    const {
-      youtubeVideoId,
-      fetchYoutubeMeta,
-      resolveYoutubeMedia,
-      downloadResolvedMedia,
-      youtubeImportBlockedReason,
-    } = await import("./youtube.server");
-    const { MAX_LINK_IMPORT_BYTES, STORAGE_BUCKET } = await import("@/constants/app");
+    const { youtubeVideoId, fetchYoutubeMeta, youtubeImportBlockedReason } = await import(
+      "./youtube.server"
+    );
     const { supabase, userId } = context;
 
     const videoId = youtubeVideoId(data.url);
@@ -247,16 +217,6 @@ export const importYouTubeVideo = createServerFn({ method: "POST" })
     if (configIssue) throw new Error(configIssue);
 
     const meta = await fetchYoutubeMeta(videoId);
-    const media = await resolveYoutubeMedia(videoId, data.audioOnly ? "audio" : "video");
-    const file = await downloadResolvedMedia(media, MAX_LINK_IMPORT_BYTES);
-
-    const extension = media.kind === "audio" ? "mp3" : "mp4";
-    const storagePath = `${userId}/youtube/${Date.now()}-${videoId}.${extension}`;
-    const { error: uploadError } = await supabase.storage
-      .from(STORAGE_BUCKET)
-      .upload(storagePath, file.bytes, { contentType: file.contentType, upsert: true });
-    if (uploadError) throw new Error(uploadError.message);
-
     const blocked = pipelineBlockedReason();
     const { data: video, error } = await supabase
       .from("videos")
@@ -265,17 +225,17 @@ export const importYouTubeVideo = createServerFn({ method: "POST" })
         project_id: data.projectId ?? null,
         source: "youtube",
         source_url: data.url,
-        storage_path: storagePath,
-        size_bytes: file.bytes.byteLength,
+        storage_path: null,
+        size_bytes: null,
         title: meta.title,
         channel: meta.author,
         thumbnail_url: meta.thumbnailUrl,
-        status: blocked ? "failed" : "pending",
+        status: blocked ? "failed" : "downloading",
         error: blocked,
         metadata: {
           target_duration: data.targetDuration,
           youtube_id: videoId,
-          media_kind: media.kind,
+          requested_media_kind: data.audioOnly ? "audio" : "video",
           consent_id: consentRow?.id ?? null,
         },
       })
@@ -283,20 +243,28 @@ export const importYouTubeVideo = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(error.message);
 
+    if (consentRow?.id) {
+      await supabase.from("video_consents").update({ video_id: video.id }).eq("id", consentRow.id);
+    }
+
     const { error: jobError } = await supabase.from("processing_jobs").insert(
-      PIPELINE_STAGES.filter((stage) => stage !== "download").map((stage) => ({
+      PIPELINE_STAGES.map((stage) => ({
         user_id: userId,
         video_id: video.id,
         type: stage,
         status: blocked ? ("failed" as const) : ("queued" as const),
         error: blocked,
         finished_at: blocked ? new Date().toISOString() : null,
-        payload: { target_duration: data.targetDuration },
+        payload: {
+          target_duration: data.targetDuration,
+          youtube_id: videoId,
+          requested_media_kind: data.audioOnly ? "audio" : "video",
+        },
       })),
     );
     if (jobError) throw new Error(jobError.message);
 
-    return { video, ready: isPipelineReady() };
+    return { video, ready: isPipelineReady(), queuedStages: PIPELINE_STAGES.length };
   });
 
 /**

@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef } from "react";
-import { AlertCircle, ArrowLeft, Loader2, Play, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowLeft, Loader2, Play, RefreshCw, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/layout/AppShell";
@@ -102,6 +102,9 @@ function VideoDetailPage() {
 
   const jobList = jobs.data ?? [];
   const stuck = jobList.filter((job) => job.status === "failed" || job.status === "cancelled");
+  const youtubeBlocked =
+    video.data?.source === "youtube" &&
+    stuck.some((job) => /sign in|blocked|captcha|cookie|residential|login/i.test(job.error ?? ""));
   const words = (transcription.data?.words ?? []) as unknown as TranscriptWord[];
   const loadError = (video.error ?? jobs.error ?? clips.error) as Error | null;
 
@@ -184,6 +187,13 @@ function VideoDetailPage() {
               )}
               Retry pipeline
             </Button>
+            {youtubeBlocked ? (
+              <Button asChild size="sm" variant="secondary">
+                <Link to="/library">
+                  <Upload className="size-4" /> Upload the video instead
+                </Link>
+              </Button>
+            ) : null}
           </AlertDescription>
         </Alert>
       ) : null}
