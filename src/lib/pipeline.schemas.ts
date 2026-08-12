@@ -21,6 +21,8 @@ export const retrySchema = z.object({
 
 export const runSchema = z.object({ videoId: z.string().uuid() });
 
+export const audioFallbackSchema = z.object({ videoId: z.string().uuid() });
+
 export const youtubeSchema = z.object({
   url: z.string().trim().url().max(2048),
   projectId: z.string().uuid().nullable().optional(),

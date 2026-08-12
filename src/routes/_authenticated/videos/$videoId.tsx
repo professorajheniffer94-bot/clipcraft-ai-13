@@ -15,7 +15,11 @@ import { clipsApi, jobsApi, transcriptionsApi, videosApi } from "@/api/queries";
 import { ClipRenderButton } from "@/components/video/ClipRenderButton";
 import { JOB_LABELS } from "@/constants/app";
 import { formatDuration, relativeTime } from "@/utils/format";
-import { processVideo, retryVideoPipeline } from "@/lib/pipeline.functions";
+import {
+  continueYouTubeAsAudio,
+  processVideo,
+  retryVideoPipeline,
+} from "@/lib/pipeline.functions";
 import type { TranscriptWord } from "@/services/providers/types";
 import { isTransientError } from "@/lib/retry";
 
@@ -89,6 +93,15 @@ function VideoDetailPage() {
   }, [video.data?.status, jobs.data, processMutation]);
 
   const runRetry = useServerFn(retryVideoPipeline);
+  const runAudioFallback = useServerFn(continueYouTubeAsAudio);
+  const audioFallbackMutation = useMutation({
+    mutationFn: () => runAudioFallback({ data: { videoId } }),
+    onSuccess: (result) => {
+      toast.success(result.message);
+      processMutation.mutate();
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
   const retryMutation = useMutation({
     mutationFn: (jobId?: string) => runRetry({ data: { videoId, jobId: jobId ?? null } }),
     onSuccess: (result) => {
@@ -189,11 +202,26 @@ function VideoDetailPage() {
               Retry pipeline
             </Button>
             {youtubeBlocked ? (
-              <Button asChild size="sm" variant="secondary">
-                <Link to="/library">
-                  <Upload className="size-4" /> Upload the video instead
-                </Link>
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={audioFallbackMutation.isPending}
+                  onClick={() => audioFallbackMutation.mutate()}
+                >
+                  {audioFallbackMutation.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Play className="size-4" />
+                  )}
+                  Continue with audio
+                </Button>
+                <Button asChild size="sm" variant="secondary">
+                  <Link to="/library">
+                    <Upload className="size-4" /> Upload the video instead
+                  </Link>
+                </Button>
+              </div>
             ) : null}
           </AlertDescription>
         </Alert>

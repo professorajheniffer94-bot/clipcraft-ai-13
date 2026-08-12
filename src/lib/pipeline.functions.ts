@@ -3,6 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   importSchema,
+  audioFallbackSchema,
   registerUploadSchema,
   retrySchema,
   runSchema,
@@ -277,4 +278,44 @@ export const processVideo = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { runVideoPipeline } = await import("./pipeline-worker.server");
     return runVideoPipeline(context.supabase, context.userId, data.videoId);
+  });
+
+/** Requeues a blocked YouTube import in audio-only mode for transcription and analysis. */
+export const continueYouTubeAsAudio = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => audioFallbackSchema.parse(data))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const { data: video, error: videoError } = await supabase
+      .from("videos")
+      .select("id, source, metadata")
+      .eq("id", data.videoId)
+      .eq("user_id", userId)
+      .single();
+    if (videoError || !video) throw new Error(videoError?.message ?? "Video not found");
+    if (video.source !== "youtube") throw new Error("Audio fallback is only available for YouTube imports");
+
+    const metadata = video.metadata as Record<string, unknown>;
+    const { error: updateError } = await supabase
+      .from("videos")
+      .update({
+        status: "downloading",
+        error: null,
+        storage_path: null,
+        size_bytes: null,
+        metadata: { ...metadata, requested_media_kind: "audio" },
+      })
+      .eq("id", data.videoId)
+      .eq("user_id", userId);
+    if (updateError) throw new Error(updateError.message);
+
+    const { error: jobsError } = await supabase
+      .from("processing_jobs")
+      .update({ status: "queued", progress: 0, error: null, started_at: null, finished_at: null })
+      .eq("video_id", data.videoId)
+      .eq("user_id", userId)
+      .in("type", ["download", "transcription", "ai_analysis", "clip_generation"]);
+    if (jobsError) throw new Error(jobsError.message);
+
+    return { ok: true, message: "Audio-only import queued" };
   });
