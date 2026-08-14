@@ -73,6 +73,7 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
 
   let activeStage: Stage | null = null;
   try {
+    let downloadProvider: string | null = null;
     const download = jobFor("download");
     if (download && download.status !== "succeeded") {
       activeStage = "download";
@@ -89,9 +90,11 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
         const youtubeId = String(metadata["youtube_id"] ?? "");
         if (!youtubeId) throw new Error("YouTube import is missing its video identifier");
         const requested = metadata["requested_media_kind"] === "audio" ? "audio" : "video";
-        await setJob(supabase, download.id, { progress: 30, provider: "cobalt" });
-        const media = await resolveYoutubeMedia(youtubeId, requested);
-        await setJob(supabase, download.id, { progress: 55, provider: "cobalt" });
+        const resolution = await resolveYoutubeMedia(youtubeId, requested);
+        downloadProvider = resolution.provider;
+        const { media } = resolution;
+        await setJob(supabase, download.id, { progress: 30, provider: downloadProvider });
+        await setJob(supabase, download.id, { progress: 55, provider: downloadProvider });
         const file = await downloadResolvedMedia(media, MAX_LINK_IMPORT_BYTES);
         const extension = media.kind === "audio" ? "mp3" : "mp4";
         const storagePath = `${userId}/youtube/${Date.now()}-${youtubeId}.${extension}`;
@@ -120,7 +123,7 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
         progress: 100,
         started_at: new Date().toISOString(),
         finished_at: new Date().toISOString(),
-        provider: video.source === "youtube" ? "cobalt" : "direct",
+        provider: downloadProvider ?? (video.source === "youtube" ? "cobalt" : "direct"),
         result: {
           source: video.storage_path ? "storage" : "url",
           media_kind: String(
