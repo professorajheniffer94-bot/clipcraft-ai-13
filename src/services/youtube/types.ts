@@ -18,7 +18,7 @@ export interface ResolvedMediaWithFallback extends ResolvedMedia {
 export interface YoutubeProviderRequest {
   videoId: string;
   mode: "video" | "audio";
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 export interface YoutubeProviderResult {
@@ -26,9 +26,10 @@ export interface YoutubeProviderResult {
   media: ResolvedMediaWithFallback;
   metadata?: {
     /** Human-readable note about the chosen mode/provider. */
-    note?: string;
+    note?: string | undefined;
   };
 }
+
 
 export interface YoutubeProvider {
   readonly id: string;
