@@ -51,7 +51,7 @@ export const cobaltProvider: YoutubeProvider = {
     const response = await resolveWithTimeout(
       fetch(endpoint, {
         method: "POST",
-        signal,
+        signal: signal ?? null,
         headers: {
           "content-type": "application/json",
           accept: "application/json",
