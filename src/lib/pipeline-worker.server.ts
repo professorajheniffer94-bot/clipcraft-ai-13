@@ -73,6 +73,7 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
 
   let activeStage: Stage | null = null;
   try {
+    let downloadProvider: string | null = null;
     const download = jobFor("download");
     if (download && download.status !== "succeeded") {
       activeStage = "download";
