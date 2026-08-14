@@ -120,7 +120,7 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
         progress: 100,
         started_at: new Date().toISOString(),
         finished_at: new Date().toISOString(),
-        provider: video.source === "youtube" ? "cobalt" : "direct",
+        provider: downloadProvider ?? (video.source === "youtube" ? "cobalt" : "direct"),
         result: {
           source: video.storage_path ? "storage" : "url",
           media_kind: String(
