@@ -210,8 +210,9 @@ export async function resolveYoutubeWithFallback(
   }
 
   if (mode === "audio") {
+    const first = available[0];
     // For audio-only, try the first available provider directly.
-    const result = await tryProvider(available[0], videoId, "audio", signal);
+    const result = await tryProvider(first, videoId, "audio", signal);
     if (result.media.kind === "audio") return result;
     // If a video file was returned, that's fine too; we can still extract audio later.
     return result;
