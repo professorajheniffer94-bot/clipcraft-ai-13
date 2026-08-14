@@ -210,7 +210,7 @@ export async function resolveYoutubeWithFallback(
   }
 
   if (mode === "audio") {
-    const first = available[0];
+    const first = available[0]!;
     // For audio-only, try the first available provider directly.
     const result = await tryProvider(first, videoId, "audio", signal);
     if (result.media.kind === "audio") return result;
