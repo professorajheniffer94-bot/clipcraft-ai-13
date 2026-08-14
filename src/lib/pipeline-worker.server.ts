@@ -90,8 +90,10 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
         const youtubeId = String(metadata["youtube_id"] ?? "");
         if (!youtubeId) throw new Error("YouTube import is missing its video identifier");
         const requested = metadata["requested_media_kind"] === "audio" ? "audio" : "video";
-        await setJob(supabase, download.id, { progress: 30, provider: "cobalt" });
-        const { provider: downloadProvider, media } = await resolveYoutubeMedia(youtubeId, requested);
+        const resolution = await resolveYoutubeMedia(youtubeId, requested);
+        downloadProvider = resolution.provider;
+        const { media } = resolution;
+        await setJob(supabase, download.id, { progress: 30, provider: downloadProvider });
         await setJob(supabase, download.id, { progress: 55, provider: downloadProvider });
         const file = await downloadResolvedMedia(media, MAX_LINK_IMPORT_BYTES);
         const extension = media.kind === "audio" ? "mp3" : "mp4";
