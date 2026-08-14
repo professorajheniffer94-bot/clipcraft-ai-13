@@ -74,9 +74,9 @@ export function youtubeImportBlockedReason(): string | null {
 export async function resolveYoutubeMedia(
   videoId: string,
   mode: "video" | "audio",
-): Promise<ResolvedMediaWithFallback> {
+): Promise<{ provider: string; media: ResolvedMediaWithFallback }> {
   const result = await resolveYoutubeWithFallback(videoId, mode, providers);
-  return result.media;
+  return { provider: result.provider, media: result.media };
 }
 
 /** Downloads the resolved file, enforcing the plan's size ceiling. */
