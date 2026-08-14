@@ -102,7 +102,7 @@ export const rapidApiProvider: YoutubeProvider = {
     const response = await resolveWithTimeout(
       fetch(endpoint, {
         method: "GET",
-        signal,
+        signal: signal ?? null,
         headers: {
           "X-RapidAPI-Key": key,
           "X-RapidAPI-Host": host,
