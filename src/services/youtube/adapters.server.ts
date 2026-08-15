@@ -5,6 +5,14 @@ import type {
   YoutubeProviderResult,
 } from "./types";
 
+export const YOUTUBE_PROVIDERS = {
+  cobalt: { requiredEnv: ["COBALT_API_URL"] as const },
+  rapidapi: { requiredEnv: ["RAPIDAPI_KEY"] as const },
+  tornado: { requiredEnv: ["TORNADO_API_KEY"] as const },
+};
+
+
+
 function env(name: string): string | undefined {
   const value = process.env[name];
   return value && value.length > 0 ? value : undefined;
@@ -151,7 +159,116 @@ export const rapidApiProvider: YoutubeProvider = {
   },
 };
 
+/** Tornado API (https://tornadoapi.io) — job-based YouTube downloader. */
+export const tornadoProvider: YoutubeProvider = {
+
+  id: "tornado",
+  isAvailable() {
+    return Boolean(env("TORNADO_API_KEY"));
+  },
+  async resolve({ videoId, mode, signal }): Promise<YoutubeProviderResult> {
+    const key = env("TORNADO_API_KEY");
+    if (!key) throw new Error("TORNADO_API_KEY is not configured");
+
+    const base = "https://api.tornadoapi.io";
+
+    const createResponse = await resolveWithTimeout(
+      fetch(`${base}/jobs`, {
+        method: "POST",
+        signal: signal ?? null,
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+          "x-api-key": key,
+        },
+        body: JSON.stringify({
+          url: `https://www.youtube.com/watch?v=${videoId}`,
+          format: mode === "audio" ? "mp3" : "mp4",
+          filename: `${videoId}-${mode}`,
+        }),
+      }),
+      30_000,
+      signal,
+    );
+
+    const createPayload = (await createResponse.json().catch(() => null)) as
+      | { job_id?: string; batch_id?: string; error?: string }
+      | null;
+
+    if (!createPayload || !createPayload.job_id) {
+      throw new YoutubeProviderError(
+        createPayload?.error ?? "Tornado did not create a download job",
+        /invalid|unauthorized|key/i.test(createPayload?.error ?? ""),
+        "tornado",
+      );
+    }
+
+    const jobId = createPayload.job_id;
+    const maxPolls = 60; // up to ~5 minutes
+    const pollIntervalMs = 5_000;
+
+    for (let i = 0; i < maxPolls; i++) {
+      if (signal?.aborted) throw new Error("Request aborted");
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+
+      const statusResponse = await resolveWithTimeout(
+        fetch(`${base}/jobs/${jobId}`, {
+          method: "GET",
+          signal: signal ?? null,
+          headers: {
+            accept: "application/json",
+            "x-api-key": key,
+          },
+        }),
+        30_000,
+        signal,
+      );
+
+      const statusPayload = (await statusResponse.json().catch(() => null)) as
+        | {
+            status?: string;
+            step?: string;
+            s3_url?: string;
+            url?: string;
+            error?: string;
+            error_type?: string;
+          }
+        | null;
+
+      if (!statusPayload) continue;
+
+      const status = statusPayload.status?.toLowerCase();
+      if (status === "completed") {
+        const downloadUrl = statusPayload.s3_url || statusPayload.url;
+        if (!downloadUrl) {
+          throw new YoutubeProviderError("Tornado completed without a download URL", true, "tornado");
+        }
+        return {
+          provider: "tornado",
+          media: {
+            url: downloadUrl,
+            filename: `${videoId}.${mode === "audio" ? "mp3" : "mp4"}`,
+            kind: mode,
+          },
+        };
+      }
+      if (status === "failed" || status === "skipped" || status === "warning") {
+        const error = statusPayload.error || statusPayload.error_type || "Tornado download failed";
+        throw new YoutubeProviderError(
+          error,
+          /private|removed|unavailable|not found|login|age|copyright|invalid|key|auth/i.test(error),
+          "tornado",
+        );
+      }
+      // Pending / Processing: keep polling
+    }
+
+    throw new YoutubeProviderError("Tornado job timed out while waiting for download", false, "tornado");
+  },
+};
+
 class YoutubeProviderError extends Error {
+
   readonly fatal: boolean;
   readonly provider: string;
   constructor(message: string, fatal: boolean, provider: string) {
@@ -180,8 +297,9 @@ function classifyCobaltError(code: string, httpStatus: number): string {
 }
 
 function isFatalCobaltError(code: string): boolean {
-  return /unavailable|not.?found|removed|live|length|duration|private|copyright|age|login|auth/i.test(code);
+  return /unavailable|not.?found|removed|live|length|duration|copyright|age/i.test(code);
 }
+
 
 function rewriteToBase(mediaUrl: string, endpoint: string): string {
   try {
@@ -211,20 +329,16 @@ export async function resolveYoutubeWithFallback(
 
   if (mode === "audio") {
     const first = available[0]!;
-    // For audio-only, try the first available provider directly.
     const result = await tryProvider(first, videoId, "audio", signal);
     if (result.media.kind === "audio") return result;
-    // If a video file was returned, that's fine too; we can still extract audio later.
     return result;
   }
 
-  // Try each provider for video; if video fails, fall back to audio.
   let lastError: unknown;
   for (const provider of available) {
     try {
       const result = await tryProvider(provider, videoId, "video", signal);
       if (result.media.kind === "audio") {
-        // Provider returned audio; keep trying other providers for video, or return audio if last.
         if (provider === available[available.length - 1]) return result;
         lastError = new YoutubeProviderError(
           `${provider.id} returned audio only for a video request`,
@@ -240,7 +354,6 @@ export async function resolveYoutubeWithFallback(
     }
   }
 
-  // Last resort: audio-only from the first provider.
   for (const provider of available) {
     try {
       const result = await tryProvider(provider, videoId, "audio", signal);
@@ -252,8 +365,17 @@ export async function resolveYoutubeWithFallback(
   }
 
   throw lastError instanceof Error
-    ? lastError
-    : new Error("YouTube blocked every configured download provider. Try uploading the file instead.");
+    ? new YoutubeProviderError(
+        `YouTube blocked every configured download provider for both video and audio. ${lastError.message}`,
+        false,
+        "fallback-chain",
+      )
+    : new YoutubeProviderError(
+        "YouTube blocked every configured download provider. Subscribe to RapidAPI YTStream or upload the file instead.",
+        false,
+        "fallback-chain",
+      );
+
 }
 
 async function tryProvider(
@@ -273,3 +395,22 @@ async function tryProvider(
     );
   }
 }
+
+/** Creates a high-level provider that wraps the configured fallback chain. */
+export function createYoutubeProvider(): YoutubeProvider {
+  return {
+    id: "fallback-chain",
+    isAvailable() {
+      return cobaltProvider.isAvailable() || rapidApiProvider.isAvailable() || tornadoProvider.isAvailable();
+    },
+    async resolve(request) {
+      return await resolveYoutubeWithFallback(
+        request.videoId,
+        request.mode,
+        [cobaltProvider, rapidApiProvider, tornadoProvider],
+        request.signal,
+      );
+    },
+  };
+}
+

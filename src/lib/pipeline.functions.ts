@@ -18,6 +18,80 @@ export const getProviderStatus = createServerFn({ method: "GET" })
     return { providers: providerStatus(), ready: isPipelineReady() };
   });
 
+/** YouTube provider readiness for the import dialog. */
+export const getYouTubeImportStatus = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => {
+    const { cobaltProvider, rapidApiProvider, tornadoProvider } = await import(
+      "@/services/youtube/adapters.server"
+    );
+    const { fetchYoutubeMeta } = await import("./youtube.server");
+
+    const status = {
+      cobalt: {
+        configured: cobaltProvider.isAvailable(),
+        healthy: false,
+        error: null as string | null,
+      },
+      rapidapi: {
+        configured: rapidApiProvider.isAvailable(),
+        subscribed: false,
+        error: null as string | null,
+      },
+      tornado: {
+        configured: tornadoProvider.isAvailable(),
+        healthy: false,
+        error: null as string | null,
+      },
+    };
+
+    // Lightweight health check: resolve a known public video (Big Buck Bunny) in audio mode.
+    if (status.cobalt.configured) {
+      try {
+        const result = await cobaltProvider.resolve({
+          videoId: "aqz-KE-bpKQ",
+          mode: "audio",
+        });
+        status.cobalt.healthy = Boolean(result.media?.url);
+      } catch (error) {
+        status.cobalt.error = error instanceof Error ? error.message : "Cobalt health check failed";
+        // Cobalt can still be usable even if the sample video is blocked; don't mark unconfigured.
+      }
+    }
+
+    if (status.rapidapi.configured) {
+      try {
+        const result = await rapidApiProvider.resolve({
+          videoId: "aqz-KE-bpKQ",
+          mode: "audio",
+        });
+        status.rapidapi.subscribed = Boolean(result.media?.url);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "RapidAPI check failed";
+        status.rapidapi.error = /not subscribed|unauthorized|401/i.test(message)
+          ? "Key exists but is not subscribed to the YTStream plan on RapidAPI."
+          : message;
+      }
+    }
+
+    if (status.tornado.configured) {
+      try {
+        const result = await tornadoProvider.resolve({
+          videoId: "aqz-KE-bpKQ",
+          mode: "audio",
+        });
+        status.tornado.healthy = Boolean(result.media?.url);
+      } catch (error) {
+        status.tornado.error = error instanceof Error ? error.message : "Tornado health check failed";
+      }
+    }
+
+    const metaCheck = await fetchYoutubeMeta("aqz-KE-bpKQ").catch(() => null);
+
+    return { status, youtubeReachable: Boolean(metaCheck) };
+  });
+
+
 /**
  * Registers an external video and queues the full processing pipeline.
  * Jobs stay queued until provider credentials are configured.

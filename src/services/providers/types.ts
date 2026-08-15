@@ -4,7 +4,7 @@
  * provider can be swapped without touching application logic.
  */
 
-export type ProviderCapability = "transcription" | "analysis" | "render" | "voice";
+export type ProviderCapability = "transcription" | "analysis" | "render" | "voice" | "youtube";
 
 export interface ProviderDescriptor {
   capability: ProviderCapability;
@@ -133,6 +133,11 @@ export interface RenderResult {
 export interface RenderProvider {
   id: string;
   render(request: RenderRequest): Promise<RenderResult>;
+}
+
+export interface YoutubeProvider {
+  id: string;
+  resolve(videoId: string, mode: "video" | "audio", signal?: AbortSignal): Promise<{ url: string; kind: "video" | "audio"; provider: string }>;
 }
 
 export class ProviderNotConfiguredError extends Error {
