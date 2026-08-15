@@ -154,11 +154,14 @@ export const rapidApiProvider: YoutubeProvider = {
       },
       metadata: {
         note: chosen.type?.startsWith("audio") ? "RapidAPI returned audio-only" : undefined,
+      },
+    };
   },
 };
 
 /** Tornado API (https://tornadoapi.io) — job-based YouTube downloader. */
 export const tornadoProvider: YoutubeProvider = {
+
   id: "tornado",
   isAvailable() {
     return Boolean(env("TORNADO_API_KEY"));
