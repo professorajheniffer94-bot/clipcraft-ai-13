@@ -1,5 +1,6 @@
 import type {
   ResolvedMediaWithFallback,
+  YoutubeMediaKind,
   YoutubeProvider,
   YoutubeProviderRequest,
   YoutubeProviderResult,
@@ -8,7 +9,9 @@ import type {
 export const YOUTUBE_PROVIDERS = {
   cobalt: { requiredEnv: ["COBALT_API_URL"] as const },
   rapidapi: { requiredEnv: ["RAPIDAPI_KEY"] as const },
+  tornado: { requiredEnv: ["TORNADO_API_KEY"] as const },
 };
+
 
 function env(name: string): string | undefined {
   const value = process.env[name];
