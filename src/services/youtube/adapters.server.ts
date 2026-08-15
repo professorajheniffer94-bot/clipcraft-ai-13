@@ -267,10 +267,8 @@ export const tornadoProvider: YoutubeProvider = {
   },
 };
 
-  },
-};
-
 class YoutubeProviderError extends Error {
+
   readonly fatal: boolean;
   readonly provider: string;
   constructor(message: string, fatal: boolean, provider: string) {
