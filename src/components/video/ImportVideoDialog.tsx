@@ -295,13 +295,16 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
                       YouTube's metadata endpoint is blocked from this network. Uploads still work.
                     </AlertDescription>
                   </Alert>
-                ) : !youtubeCheck.data.status.cobalt.configured && !youtubeCheck.data.status.rapidapi.configured ? (
+                ) : !youtubeCheck.data.status.cobalt.configured &&
+                  !youtubeCheck.data.status.rapidapi.configured &&
+                  !youtubeCheck.data.status.tornado.configured ? (
                   <Alert variant="destructive">
                     <AlertCircle className="size-4" />
                     <AlertTitle>YouTube import not configured</AlertTitle>
                     <AlertDescription>
-                      Add <code className="text-xs">COBALT_API_URL</code> or{" "}
-                      <code className="text-xs">RAPIDAPI_KEY</code> to import from YouTube. Use Upload
+                      Add <code className="text-xs">COBALT_API_URL</code>,{" "}
+                      <code className="text-xs">RAPIDAPI_KEY</code> or{" "}
+                      <code className="text-xs">TORNADO_API_KEY</code> to import from YouTube. Use Upload
                       meanwhile.
                     </AlertDescription>
                   </Alert>
@@ -314,16 +317,28 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
                         "The RapidAPI key exists but is not subscribed to a YTStream plan."}
                     </AlertDescription>
                   </Alert>
-                ) : !youtubeCheck.data.status.cobalt.healthy && !youtubeCheck.data.status.rapidapi.subscribed ? (
+                ) : youtubeCheck.data.status.tornado.configured && !youtubeCheck.data.status.tornado.healthy ? (
+                  <Alert variant="destructive">
+                    <AlertCircle className="size-4" />
+                    <AlertTitle>Tornado API not ready</AlertTitle>
+                    <AlertDescription>
+                      {youtubeCheck.data.status.tornado.error ??
+                        "The Tornado API key is configured but the health check failed."}
+                    </AlertDescription>
+                  </Alert>
+                ) : !youtubeCheck.data.status.cobalt.healthy &&
+                  !youtubeCheck.data.status.rapidapi.subscribed &&
+                  !youtubeCheck.data.status.tornado.healthy ? (
                   <Alert>
                     <AlertCircle className="size-4" />
                     <AlertTitle>YouTube import is limited</AlertTitle>
                     <AlertDescription>
-                      The configured Cobalt instance is being blocked by YouTube for some videos. Consider
-                      adding a subscribed RapidAPI key for better reliability.
+                      The configured providers are being blocked by YouTube for some videos. Consider adding a
+                      subscribed RapidAPI key or a Tornado API key for better reliability.
                     </AlertDescription>
                   </Alert>
                 ) : null}
+
               </div>
             )}
             <div className="space-y-2">
