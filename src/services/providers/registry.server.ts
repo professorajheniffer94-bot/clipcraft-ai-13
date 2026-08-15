@@ -4,11 +4,13 @@ import type {
   ProviderDescriptor,
   RenderProvider,
   TranscriptionProvider,
+  YoutubeProvider,
 } from "./types";
 import { ProviderNotConfiguredError } from "./types";
 import { createTranscriptionProvider, TRANSCRIPTION_PROVIDERS } from "../transcription/adapters.server";
 import { createAnalysisProvider, ANALYSIS_PROVIDERS } from "../ai/adapters.server";
 import { createRenderProvider, RENDER_PROVIDERS } from "../media/adapters.server";
+import { YOUTUBE_PROVIDERS, createYoutubeProvider } from "../youtube/adapters.server";
 
 function env(name: string): string | undefined {
   const value = process.env[name];
@@ -44,6 +46,11 @@ const SPECS: Record<ProviderCapability, CapabilitySpec> = {
     selectorEnv: "VOICE_PROVIDER",
     fallbackId: "elevenlabs",
     providers: { elevenlabs: { requiredEnv: ["ELEVENLABS_API_KEY"] } },
+  },
+  youtube: {
+    selectorEnv: "YOUTUBE_PROVIDER",
+    fallbackId: "fallback-chain",
+    providers: { ...YOUTUBE_PROVIDERS, "fallback-chain": { requiredEnv: [] } },
   },
 };
 

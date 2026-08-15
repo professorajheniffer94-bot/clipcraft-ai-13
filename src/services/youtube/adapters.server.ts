@@ -5,6 +5,11 @@ import type {
   YoutubeProviderResult,
 } from "./types";
 
+export const YOUTUBE_PROVIDERS = {
+  cobalt: { requiredEnv: ["COBALT_API_URL"] as const },
+  rapidapi: { requiredEnv: ["RAPIDAPI_KEY"] as const },
+};
+
 function env(name: string): string | undefined {
   const value = process.env[name];
   return value && value.length > 0 ? value : undefined;
@@ -180,8 +185,9 @@ function classifyCobaltError(code: string, httpStatus: number): string {
 }
 
 function isFatalCobaltError(code: string): boolean {
-  return /unavailable|not.?found|removed|live|length|duration|private|copyright|age|login|auth/i.test(code);
+  return /unavailable|not.?found|removed|live|length|duration|copyright|age/i.test(code);
 }
+
 
 function rewriteToBase(mediaUrl: string, endpoint: string): string {
   try {
@@ -211,20 +217,16 @@ export async function resolveYoutubeWithFallback(
 
   if (mode === "audio") {
     const first = available[0]!;
-    // For audio-only, try the first available provider directly.
     const result = await tryProvider(first, videoId, "audio", signal);
     if (result.media.kind === "audio") return result;
-    // If a video file was returned, that's fine too; we can still extract audio later.
     return result;
   }
 
-  // Try each provider for video; if video fails, fall back to audio.
   let lastError: unknown;
   for (const provider of available) {
     try {
       const result = await tryProvider(provider, videoId, "video", signal);
       if (result.media.kind === "audio") {
-        // Provider returned audio; keep trying other providers for video, or return audio if last.
         if (provider === available[available.length - 1]) return result;
         lastError = new YoutubeProviderError(
           `${provider.id} returned audio only for a video request`,
@@ -240,7 +242,6 @@ export async function resolveYoutubeWithFallback(
     }
   }
 
-  // Last resort: audio-only from the first provider.
   for (const provider of available) {
     try {
       const result = await tryProvider(provider, videoId, "audio", signal);
@@ -252,8 +253,17 @@ export async function resolveYoutubeWithFallback(
   }
 
   throw lastError instanceof Error
-    ? lastError
-    : new Error("YouTube blocked every configured download provider. Try uploading the file instead.");
+    ? new YoutubeProviderError(
+        `YouTube blocked every configured download provider for both video and audio. ${lastError.message}`,
+        false,
+        "fallback-chain",
+      )
+    : new YoutubeProviderError(
+        "YouTube blocked every configured download provider. Subscribe to RapidAPI YTStream or upload the file instead.",
+        false,
+        "fallback-chain",
+      );
+
 }
 
 async function tryProvider(
@@ -272,4 +282,22 @@ async function tryProvider(
       provider.id,
     );
   }
+}
+
+/** Creates a high-level provider that wraps the configured fallback chain. */
+export function createYoutubeProvider(): YoutubeProvider {
+  return {
+    id: "fallback-chain",
+    isAvailable() {
+      return cobaltProvider.isAvailable() || rapidApiProvider.isAvailable();
+    },
+    async resolve(request) {
+      return await resolveYoutubeWithFallback(
+        request.videoId,
+        request.mode,
+        [cobaltProvider, rapidApiProvider],
+        request.signal,
+      );
+    },
+  };
 }

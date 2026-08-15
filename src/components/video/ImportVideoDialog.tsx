@@ -32,6 +32,7 @@ import {
   importYouTubeVideo,
   processVideo,
   registerUploadedVideo,
+  getYouTubeImportStatus,
 } from "@/lib/pipeline.functions";
 import {
   CLIP_DURATIONS,
@@ -65,7 +66,13 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
   const registerUpload = useServerFn(registerUploadedVideo);
   const importYoutube = useServerFn(importYouTubeVideo);
   const startProcessing = useServerFn(processVideo);
+  const youtubeStatus = useServerFn(getYouTubeImportStatus);
   const projects = useQuery({ queryKey: ["projects"], queryFn: projectsApi.list });
+  const youtubeCheck = useQuery({
+    queryKey: ["youtube", "status"],
+    queryFn: youtubeStatus,
+    staleTime: 30_000,
+  });
 
   function done(message: string, videoId?: string) {
     toast.success(message);
@@ -278,6 +285,47 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
           </TabsList>
 
           <TabsContent value="youtube" className="space-y-3 pt-4">
+            {youtubeCheck.data && (
+              <div className="space-y-2">
+                {!youtubeCheck.data.youtubeReachable ? (
+                  <Alert variant="destructive">
+                    <AlertCircle className="size-4" />
+                    <AlertTitle>YouTube unreachable</AlertTitle>
+                    <AlertDescription>
+                      YouTube's metadata endpoint is blocked from this network. Uploads still work.
+                    </AlertDescription>
+                  </Alert>
+                ) : !youtubeCheck.data.status.cobalt.configured && !youtubeCheck.data.status.rapidapi.configured ? (
+                  <Alert variant="destructive">
+                    <AlertCircle className="size-4" />
+                    <AlertTitle>YouTube import not configured</AlertTitle>
+                    <AlertDescription>
+                      Add <code className="text-xs">COBALT_API_URL</code> or{" "}
+                      <code className="text-xs">RAPIDAPI_KEY</code> to import from YouTube. Use Upload
+                      meanwhile.
+                    </AlertDescription>
+                  </Alert>
+                ) : youtubeCheck.data.status.rapidapi.configured && !youtubeCheck.data.status.rapidapi.subscribed ? (
+                  <Alert variant="destructive">
+                    <AlertCircle className="size-4" />
+                    <AlertTitle>RapidAPI not subscribed</AlertTitle>
+                    <AlertDescription>
+                      {youtubeCheck.data.status.rapidapi.error ??
+                        "The RapidAPI key exists but is not subscribed to a YTStream plan."}
+                    </AlertDescription>
+                  </Alert>
+                ) : !youtubeCheck.data.status.cobalt.healthy && !youtubeCheck.data.status.rapidapi.subscribed ? (
+                  <Alert>
+                    <AlertCircle className="size-4" />
+                    <AlertTitle>YouTube import is limited</AlertTitle>
+                    <AlertDescription>
+                      The configured Cobalt instance is being blocked by YouTube for some videos. Consider
+                      adding a subscribed RapidAPI key for better reliability.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="youtube-url">YouTube link</Label>
               <Input
@@ -288,7 +336,8 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
               />
               <p className="text-xs text-muted-foreground">
                 We download the video for you (up to {formatBytes(MAX_LINK_IMPORT_BYTES)}) and run the
-                same pipeline as an upload. Private, removed and live videos can't be imported.
+                same pipeline as an upload. Private, removed and live videos can't be imported. If the
+                video stream is blocked, we fall back to audio-only transcription and analysis.
               </p>
             </div>
             {youtubeUrl.trim().length > 0 && !youtubeValid ? (

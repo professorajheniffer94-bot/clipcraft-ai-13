@@ -6,6 +6,7 @@ import type { AnalyzedMoment } from "@/services/providers/types";
 import { MAX_LINK_IMPORT_BYTES, STORAGE_BUCKET } from "@/constants/app";
 import { downloadResolvedMedia, resolveYoutubeMedia } from "./youtube.server";
 
+import { withRetry } from "./retry";
 import { momentToClipInsert, pipelineBlockedReason } from "./pipeline.server";
 
 type Client = SupabaseClient<Database>;
@@ -73,7 +74,6 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
 
   let activeStage: Stage | null = null;
   try {
-    let downloadProvider: string | null = null;
     const download = jobFor("download");
     if (download && download.status !== "succeeded") {
       activeStage = "download";
@@ -85,20 +85,49 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
         error: null,
       });
 
+      let downloadProvider: string | null = null;
+      let mediaKind: "video" | "audio" = "video";
       if (video.source === "youtube" && !video.storage_path) {
         const metadata = video.metadata as Record<string, unknown>;
         const youtubeId = String(metadata["youtube_id"] ?? "");
         if (!youtubeId) throw new Error("YouTube import is missing its video identifier");
         const requested = metadata["requested_media_kind"] === "audio" ? "audio" : "video";
-        const resolution = await resolveYoutubeMedia(youtubeId, requested);
-        downloadProvider = resolution.provider;
-        const { media } = resolution;
+
+        let resolution: Awaited<ReturnType<typeof resolveYoutubeMedia>> | null = null;
+        let lastError: Error | null = null;
+        const modes = requested === "video" ? (["video", "audio"] as const) : (["audio"] as const);
+        for (const mode of modes) {
+          try {
+            resolution = await withRetry(
+              () => resolveYoutubeMedia(youtubeId, mode),
+              {
+                attempts: 2,
+                isRetryable: (error) =>
+                  /timeout|timed out|rate|limit|502|503|504|failed to fetch|network/i.test(error.message),
+              },
+            );
+            downloadProvider = resolution.provider;
+            mediaKind = resolution.media.kind;
+            break;
+          } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            if (mode === "video") {
+              await setJob(supabase, download.id, {
+                progress: 20,
+                error: `${lastError.message}. Trying audio-only fallback…`,
+              });
+            }
+          }
+        }
+        if (!resolution) {
+          throw lastError ?? new Error("YouTube download failed");
+        }
+
         await setJob(supabase, download.id, { progress: 30, provider: downloadProvider });
-        await setJob(supabase, download.id, { progress: 55, provider: downloadProvider });
-        const file = await downloadResolvedMedia(media, MAX_LINK_IMPORT_BYTES);
-        const extension = media.kind === "audio" ? "mp3" : "mp4";
+        const file = await downloadResolvedMedia(resolution.media, MAX_LINK_IMPORT_BYTES);
+        await setJob(supabase, download.id, { progress: 70, provider: downloadProvider });
+        const extension = mediaKind === "audio" ? "mp3" : "mp4";
         const storagePath = `${userId}/youtube/${Date.now()}-${youtubeId}.${extension}`;
-        await setJob(supabase, download.id, { progress: 80 });
         const { error: uploadError } = await supabase.storage
           .from(STORAGE_BUCKET)
           .upload(storagePath, file.bytes, { contentType: file.contentType, upsert: true });
@@ -108,14 +137,14 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
           .update({
             storage_path: storagePath,
             size_bytes: file.bytes.byteLength,
-            metadata: { ...metadata, media_kind: media.kind },
+            metadata: { ...metadata, media_kind: mediaKind },
           })
           .eq("id", videoId)
           .eq("user_id", userId);
         if (updateVideoError) throw new Error(updateVideoError.message);
         video.storage_path = storagePath;
         video.size_bytes = file.bytes.byteLength;
-        video.metadata = { ...metadata, media_kind: media.kind };
+        video.metadata = { ...metadata, media_kind: mediaKind };
       }
 
       await setJob(supabase, download.id, {
@@ -126,10 +155,8 @@ export async function runVideoPipeline(supabase: Client, userId: string, videoId
         provider: downloadProvider ?? (video.source === "youtube" ? "cobalt" : "direct"),
         result: {
           source: video.storage_path ? "storage" : "url",
-          media_kind: String(
-            (video.metadata as Record<string, unknown>)["media_kind"] ?? "video",
-          ),
-        },
+          media_kind: mediaKind,
+        } as unknown as Json,
       });
     }
 
