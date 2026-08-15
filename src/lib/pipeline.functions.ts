@@ -22,7 +22,9 @@ export const getProviderStatus = createServerFn({ method: "GET" })
 export const getYouTubeImportStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
-    const { cobaltProvider, rapidApiProvider } = await import("@/services/youtube/adapters.server");
+    const { cobaltProvider, rapidApiProvider, tornadoProvider } = await import(
+      "@/services/youtube/adapters.server"
+    );
     const { fetchYoutubeMeta } = await import("./youtube.server");
 
     const status = {
@@ -34,6 +36,11 @@ export const getYouTubeImportStatus = createServerFn({ method: "GET" })
       rapidapi: {
         configured: rapidApiProvider.isAvailable(),
         subscribed: false,
+        error: null as string | null,
+      },
+      tornado: {
+        configured: tornadoProvider.isAvailable(),
+        healthy: false,
         error: null as string | null,
       },
     };
@@ -67,12 +74,23 @@ export const getYouTubeImportStatus = createServerFn({ method: "GET" })
       }
     }
 
-    const metaCheck = await fetchYoutubeMeta("aqz-KE-bpKQ").catch(
-      () => null,
-    );
+    if (status.tornado.configured) {
+      try {
+        const result = await tornadoProvider.resolve({
+          videoId: "aqz-KE-bpKQ",
+          mode: "audio",
+        });
+        status.tornado.healthy = Boolean(result.media?.url);
+      } catch (error) {
+        status.tornado.error = error instanceof Error ? error.message : "Tornado health check failed";
+      }
+    }
+
+    const metaCheck = await fetchYoutubeMeta("aqz-KE-bpKQ").catch(() => null);
 
     return { status, youtubeReachable: Boolean(metaCheck) };
   });
+
 
 /**
  * Registers an external video and queues the full processing pipeline.
