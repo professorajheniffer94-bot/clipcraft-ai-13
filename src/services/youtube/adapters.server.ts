@@ -154,8 +154,116 @@ export const rapidApiProvider: YoutubeProvider = {
       },
       metadata: {
         note: chosen.type?.startsWith("audio") ? "RapidAPI returned audio-only" : undefined,
-      },
-    };
+  },
+};
+
+/** Tornado API (https://tornadoapi.io) — job-based YouTube downloader. */
+export const tornadoProvider: YoutubeProvider = {
+  id: "tornado",
+  isAvailable() {
+    return Boolean(env("TORNADO_API_KEY"));
+  },
+  async resolve({ videoId, mode, signal }): Promise<YoutubeProviderResult> {
+    const key = env("TORNADO_API_KEY");
+    if (!key) throw new Error("TORNADO_API_KEY is not configured");
+
+    const base = "https://api.tornadoapi.io";
+
+    const createResponse = await resolveWithTimeout(
+      fetch(`${base}/jobs`, {
+        method: "POST",
+        signal: signal ?? null,
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+          "x-api-key": key,
+        },
+        body: JSON.stringify({
+          url: `https://www.youtube.com/watch?v=${videoId}`,
+          format: mode === "audio" ? "mp3" : "mp4",
+          filename: `${videoId}-${mode}`,
+        }),
+      }),
+      30_000,
+      signal,
+    );
+
+    const createPayload = (await createResponse.json().catch(() => null)) as
+      | { job_id?: string; batch_id?: string; error?: string }
+      | null;
+
+    if (!createPayload || !createPayload.job_id) {
+      throw new YoutubeProviderError(
+        createPayload?.error ?? "Tornado did not create a download job",
+        /invalid|unauthorized|key/i.test(createPayload?.error ?? ""),
+        "tornado",
+      );
+    }
+
+    const jobId = createPayload.job_id;
+    const maxPolls = 60; // up to ~5 minutes
+    const pollIntervalMs = 5_000;
+
+    for (let i = 0; i < maxPolls; i++) {
+      if (signal?.aborted) throw new Error("Request aborted");
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+
+      const statusResponse = await resolveWithTimeout(
+        fetch(`${base}/jobs/${jobId}`, {
+          method: "GET",
+          signal: signal ?? null,
+          headers: {
+            accept: "application/json",
+            "x-api-key": key,
+          },
+        }),
+        30_000,
+        signal,
+      );
+
+      const statusPayload = (await statusResponse.json().catch(() => null)) as
+        | {
+            status?: string;
+            step?: string;
+            s3_url?: string;
+            url?: string;
+            error?: string;
+            error_type?: string;
+          }
+        | null;
+
+      if (!statusPayload) continue;
+
+      const status = statusPayload.status?.toLowerCase();
+      if (status === "completed") {
+        const downloadUrl = statusPayload.s3_url || statusPayload.url;
+        if (!downloadUrl) {
+          throw new YoutubeProviderError("Tornado completed without a download URL", true, "tornado");
+        }
+        return {
+          provider: "tornado",
+          media: {
+            url: downloadUrl,
+            filename: `${videoId}.${mode === "audio" ? "mp3" : "mp4"}`,
+            kind: mode,
+          },
+        };
+      }
+      if (status === "failed" || status === "skipped" || status === "warning") {
+        const error = statusPayload.error || statusPayload.error_type || "Tornado download failed";
+        throw new YoutubeProviderError(
+          error,
+          /private|removed|unavailable|not found|login|age|copyright|invalid|key|auth/i.test(error),
+          "tornado",
+        );
+      }
+      // Pending / Processing: keep polling
+    }
+
+    throw new YoutubeProviderError("Tornado job timed out while waiting for download", false, "tornado");
+  },
+};
+
   },
 };
 
