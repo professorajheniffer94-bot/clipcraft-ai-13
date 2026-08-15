@@ -401,15 +401,17 @@ export function createYoutubeProvider(): YoutubeProvider {
   return {
     id: "fallback-chain",
     isAvailable() {
-      return cobaltProvider.isAvailable() || rapidApiProvider.isAvailable();
+      return cobaltProvider.isAvailable() || rapidApiProvider.isAvailable() || tornadoProvider.isAvailable();
     },
     async resolve(request) {
       return await resolveYoutubeWithFallback(
         request.videoId,
         request.mode,
-        [cobaltProvider, rapidApiProvider],
+        [cobaltProvider, rapidApiProvider, tornadoProvider],
         request.signal,
       );
     },
   };
+}
+
 }
