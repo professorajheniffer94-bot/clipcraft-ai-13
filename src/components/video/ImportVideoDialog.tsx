@@ -308,33 +308,15 @@ export function ImportVideoDialog({ projectId }: { projectId?: string }) {
                       meanwhile.
                     </AlertDescription>
                   </Alert>
-                ) : youtubeCheck.data.status.rapidapi.configured && !youtubeCheck.data.status.rapidapi.subscribed ? (
-                  <Alert variant="destructive">
-                    <AlertCircle className="size-4" />
-                    <AlertTitle>RapidAPI not subscribed</AlertTitle>
-                    <AlertDescription>
-                      {youtubeCheck.data.status.rapidapi.error ??
-                        "The RapidAPI key exists but is not subscribed to a YTStream plan."}
-                    </AlertDescription>
-                  </Alert>
-                ) : youtubeCheck.data.status.tornado.configured && !youtubeCheck.data.status.tornado.healthy ? (
-                  <Alert variant="destructive">
-                    <AlertCircle className="size-4" />
-                    <AlertTitle>Tornado API not ready</AlertTitle>
-                    <AlertDescription>
-                      {youtubeCheck.data.status.tornado.error ??
-                        "The Tornado API key is configured but the health check failed."}
-                    </AlertDescription>
-                  </Alert>
                 ) : !youtubeCheck.data.status.cobalt.healthy &&
                   !youtubeCheck.data.status.rapidapi.subscribed &&
                   !youtubeCheck.data.status.tornado.healthy ? (
                   <Alert>
                     <AlertCircle className="size-4" />
-                    <AlertTitle>YouTube import is limited</AlertTitle>
+                    <AlertTitle>YouTube import may be limited</AlertTitle>
                     <AlertDescription>
-                      The configured providers are being blocked by YouTube for some videos. Consider adding a
-                      subscribed RapidAPI key or a Tornado API key for better reliability.
+                      You can still try — we attempt every configured provider and fall back to
+                      audio-only. If it fails, use Upload.
                     </AlertDescription>
                   </Alert>
                 ) : null}
